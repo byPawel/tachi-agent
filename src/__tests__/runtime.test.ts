@@ -1,0 +1,31 @@
+import { describe, it, expect } from "vitest";
+import { DEFAULT_ALLOW } from "../runtime.js";
+
+describe("DEFAULT_ALLOW (curated small allowlist)", () => {
+  it("includes the high-leverage multi-model tools", () => {
+    expect(DEFAULT_ALLOW).toContain("tachibot_jury");
+    expect(DEFAULT_ALLOW).toContain("tachibot_tachi"); // smart router entry point
+    expect(DEFAULT_ALLOW).toContain("tachibot_planner_maker"); // council planning
+    expect(DEFAULT_ALLOW).toContain("tachibot_grok_search");
+    expect(DEFAULT_ALLOW).toContain("tachibot_perplexity_ask");
+  });
+
+  it("drops single-model gemini_judge (subsumed by tachi/jury)", () => {
+    expect(DEFAULT_ALLOW).not.toContain("tachibot_gemini_judge");
+  });
+
+  it("does not add a non-existent tachibot_council tool", () => {
+    expect(DEFAULT_ALLOW).not.toContain("tachibot_council");
+  });
+
+  it("keeps the dokoro memory tools (recall + summary_add discovered by suffix)", () => {
+    expect(DEFAULT_ALLOW).toContain("dokoro_dokoro_session_recall");
+    expect(DEFAULT_ALLOW).toContain("dokoro_dokoro_session_summary_add");
+    // session_log writes a different store recall() never reads — must NOT be used.
+    expect(DEFAULT_ALLOW).not.toContain("dokoro_dokoro_session_log");
+  });
+
+  it("stays small — a 3–8B local model drowns past ~10 tools", () => {
+    expect(DEFAULT_ALLOW.length).toBeLessThanOrEqual(10);
+  });
+});
