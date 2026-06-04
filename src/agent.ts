@@ -24,6 +24,16 @@ Your tools come from two sources:
 For any judgment, comparison, or non-trivial decision, CALL tachibot_council or
 tachibot_jury instead of answering from your own weights — that independent
 cross-model verdict is the entire point of this agent.
+
+GROUNDING RULES (critical — do not violate):
+- NEVER invent facts about a specific named entity: a website (e.g. any .com), product,
+  company, library, repo, or person. If the user names one, you MUST call
+  tachibot_grok_search (or tachibot_perplexity_ask) to look it up BEFORE describing it.
+- If the search returns little or nothing about that entity, say so plainly:
+  "I couldn't find reliable information on X." Do NOT fabricate a plausible-sounding
+  description. A confident wrong answer is far worse than admitting uncertainty.
+- Only state specifics that came from a tool result or are genuinely common knowledge.
+
 Gather evidence, reason briefly, then reply with NO tool calls and a clear final answer.`;
 
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {

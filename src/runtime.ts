@@ -47,7 +47,7 @@ export const DEFAULT_ALLOW = [
   // so they arrive double-prefixed: `dokoro_dokoro_session_recall`. DokoroMemory
   // still discovers recall/log by the `…session_recall`/`…session_log` suffix.
   "dokoro_dokoro_session_recall",
-  "dokoro_dokoro_session_log",
+  "dokoro_dokoro_session_summary_add",
   "dokoro_dokoro_workspace_status",
 ];
 
@@ -69,7 +69,9 @@ export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentR
   if (servers.length) await host.connect(servers);
 
   const driver = new OllamaDriver();
-  const memory = servers.some((s) => s.name === "dokoro") ? new DokoroMemory(host) : undefined;
+  const memory = servers.some((s) => s.name === "dokoro")
+    ? new DokoroMemory(host, { aiModel: driver.name })
+    : undefined;
 
   return {
     host,
