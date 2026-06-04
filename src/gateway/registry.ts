@@ -51,6 +51,14 @@ export class RunRegistry {
     record.status = status;
     if (result) record.result = result;
     if (error) record.error = error;
+    this.subs.delete(id); // release subscribers — the run emits no more events
+  }
+
+  /** Count a tenant's currently-running runs (for concurrency caps). */
+  runningCount(tenant: string): number {
+    let n = 0;
+    for (const r of this.runs.values()) if (r.tenant === tenant && r.status === "running") n++;
+    return n;
   }
 
   abort(id: string): boolean {

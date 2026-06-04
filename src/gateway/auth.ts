@@ -1,4 +1,5 @@
-// src/gateway/auth.ts
+import { timingSafeEqual } from "node:crypto";
+
 export interface Tenant {
   tenant: string;
 }
@@ -10,11 +11,19 @@ export function parseBearer(header: string | undefined): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** Constant-time string compare (length-guarded; avoids token-oracle timing leaks). */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
 /**
  * Resolve a tenant from a token.
- *  - GATEWAY_TOKENS="alice:tokA,bob:tokB" → multi-tenant
+ *  - GATEWAY_TOKENS="alice:tokA,bob:tokB" → multi-tenant (token may contain ':')
  *  - GATEWAY_TOKEN="tok"                  → single tenant "default"
- * Returns null if the token is absent or unmatched.
+ * Returns null if the token is absent or unmatched. Comparisons are constant-time.
  */
 export function resolveTenant(
   token: string | null,
@@ -23,11 +32,14 @@ export function resolveTenant(
   if (!token) return null;
   if (env.GATEWAY_TOKENS) {
     for (const pair of env.GATEWAY_TOKENS.split(",")) {
-      const [tenant, tok] = pair.split(":").map((s) => s.trim());
-      if (tok && tok === token) return { tenant };
+      const i = pair.indexOf(":"); // split on FIRST colon only — tokens may contain ':'
+      if (i < 0) continue;
+      const tenant = pair.slice(0, i).trim();
+      const tok = pair.slice(i + 1).trim();
+      if (tok && safeEqual(tok, token)) return { tenant };
     }
     return null;
   }
-  if (env.GATEWAY_TOKEN && token === env.GATEWAY_TOKEN) return { tenant: "default" };
+  if (env.GATEWAY_TOKEN && safeEqual(env.GATEWAY_TOKEN, token)) return { tenant: "default" };
   return null;
 }
