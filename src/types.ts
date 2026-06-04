@@ -77,12 +77,13 @@ export type AgentEvent =
   | { type: "step"; iteration: number }
   | { type: "assistant"; content: string; toolCalls: ToolCall[] }
   | { type: "tool-result"; name: string; result: string }
+  | { type: "cost"; usd: number; calls: number }
   | { type: "final"; answer: string; haltedBy: RunResult["haltedBy"] };
 
 export interface OrchestratorOptions {
   /** Hard stop on the ReAct loop. Default 10. */
   maxIterations?: number;
-  /** Wall-clock budget for the whole run (ms). Default 120_000. Local = free, so time is the only budget. */
+  /** Wall-clock budget for the whole run (ms). Default 120_000. Cloud tools cost money — see RunResult.costUsd. */
   timeoutMs?: number;
   /** Extra system-prompt guidance prepended to the agent's instructions. */
   systemPrompt?: string;
@@ -97,4 +98,6 @@ export interface RunResult {
   iterations: number;
   toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }>;
   haltedBy: "final-answer" | "max-iterations" | "timeout" | "aborted";
+  /** Rough estimated USD spent on cloud tool calls this run (0 for purely local/memory tools). */
+  costUsd: number;
 }

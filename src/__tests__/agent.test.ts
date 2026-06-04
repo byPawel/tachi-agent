@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Orchestrator } from "../agent.js";
+import { estimateCost } from "../cost.js";
 import type { Driver, ToolHost, Memory, AgentTool, DriverResult } from "../types.js";
 
 const TOOLS: AgentTool[] = [
@@ -99,5 +100,44 @@ describe("Orchestrator (the pluggable core)", () => {
     await new Orchestrator(driver, fakeHost(), memory, { signal: ac.signal }).run("go");
     expect(recall).toHaveBeenCalledWith("go", ac.signal);
     expect(log).toHaveBeenCalledWith({ task: "go", result: "answer" }, ac.signal);
+  });
+});
+
+describe("Orchestrator cost tracking", () => {
+  it("reports a non-zero costUsd after a jury call, matching estimateCost", async () => {
+    const driver = scriptDriver([
+      { content: "", toolCalls: [{ name: "tachibot_jury", arguments: {} }] },
+      { content: "done", toolCalls: [] },
+    ]);
+    const res = await new Orchestrator(driver, fakeHost(), undefined).run("go");
+    expect(res.costUsd).toBe(estimateCost(res.toolCalls));
+    expect(res.costUsd).toBeGreaterThan(0);
+  });
+
+  it("emits a cost event before final", async () => {
+    const events: string[] = [];
+    const driver = scriptDriver([
+      { content: "", toolCalls: [{ name: "tachibot_jury", arguments: {} }] },
+      { content: "done", toolCalls: [] },
+    ]);
+    await new Orchestrator(driver, fakeHost(), undefined, {
+      onEvent: (e) => events.push(e.type),
+    }).run("go");
+    expect(events).toContain("cost");
+    expect(events.indexOf("cost")).toBeLessThan(events.indexOf("final"));
+  });
+
+  it("degrades gracefully when a tool throws (e.g. timeout) — still answers", async () => {
+    const call = vi.fn(async () => {
+      throw new Error('Tool "tachibot_jury" timed out after 120000ms');
+    });
+    const host: ToolHost = { tools: () => TOOLS, call };
+    const driver = scriptDriver([
+      { content: "", toolCalls: [{ name: "tachibot_jury", arguments: {} }] },
+      { content: "best-effort answer despite timeout", toolCalls: [] },
+    ]);
+    const res = await new Orchestrator(driver, host, undefined).run("go");
+    expect(res.toolCalls[0].result).toMatch(/timed out/);
+    expect(res.answer).toBe("best-effort answer despite timeout");
   });
 });

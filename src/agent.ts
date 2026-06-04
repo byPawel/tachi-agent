@@ -15,6 +15,7 @@ import type {
   RunResult, OrchestratorOptions,
 } from "./types.js";
 import { needsGroundingSearch } from "./router.js";
+import { estimateCost } from "./cost.js";
 
 const BASE_SYSTEM = `You are TachiAgent, a local-first orchestration agent driving a ReAct loop.
 Your tools come from two sources:
@@ -132,8 +133,10 @@ export class Orchestrator {
     // 3. LOG — persist the outcome back to dokoro so the next run remembers.
     if (this.memory) await safe(() => this.memory!.log({ task, result: answer }, this.opts.signal), undefined);
 
+    const costUsd = estimateCost(toolCalls);
+    emit({ type: "cost", usd: costUsd, calls: toolCalls.length });
     emit({ type: "final", answer, haltedBy });
-    return { answer, iterations, toolCalls, haltedBy };
+    return { answer, iterations, toolCalls, haltedBy, costUsd };
   }
 
   /** Dispatch one tool call through the ToolHost; never throws (errors are fed back to the model). */

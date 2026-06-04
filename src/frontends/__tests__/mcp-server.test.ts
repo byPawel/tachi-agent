@@ -17,7 +17,7 @@ function fakeRuntime(result: RunResult | Error, capture?: (opts: unknown) => voi
   } as any;
 }
 
-const ok: RunResult = { answer: "VERDICT: ship it", iterations: 2, toolCalls: [{ name: "tachibot_jury", args: {}, result: "yes" }], haltedBy: "final-answer" };
+const ok: RunResult = { answer: "VERDICT: ship it", iterations: 2, toolCalls: [{ name: "tachibot_jury", args: {}, result: "yes" }], haltedBy: "final-answer", costUsd: 0.05 };
 
 describe("run_agent MCP handler", () => {
   it("formats a successful run as a text result with a header", async () => {

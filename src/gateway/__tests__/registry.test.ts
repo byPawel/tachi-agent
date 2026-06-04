@@ -47,7 +47,7 @@ describe("RunRegistry", () => {
     const reg = new RunRegistry();
     const a = reg.create("alice", "t");
     reg.create("bob", "t");
-    reg.finish(a.id, "done", { answer: "OK", iterations: 1, toolCalls: [], haltedBy: "final-answer" });
+    reg.finish(a.id, "done", { answer: "OK", iterations: 1, toolCalls: [], haltedBy: "final-answer", costUsd: 0 });
     expect(a.status).toBe("done");
     expect(a.result?.answer).toBe("OK");
     expect(reg.list("alice").map((r) => r.id)).toEqual([a.id]);
