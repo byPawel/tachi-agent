@@ -61,19 +61,19 @@ export class DokoroMemory implements Memory {
     );
   }
 
-  async recall(task: string): Promise<string> {
+  async recall(task: string, signal?: AbortSignal): Promise<string> {
     const tool = this.find(/session_recall$/);
     if (!tool) return "";
     const args = pickSchemaArgs(tool.parameters, { query: task, limit: this.opts.limit ?? 5 });
     try {
-      const out = await this.host.call(tool.name, args);
+      const out = await this.host.call(tool.name, args, signal);
       return out?.includes("no past sessions") ? "" : out;
     } catch {
       return "";
     }
   }
 
-  async log(entry: { task: string; result: string }): Promise<void> {
+  async log(entry: { task: string; result: string }, signal?: AbortSignal): Promise<void> {
     // session_summary_add → conversation_summaries (the table recall reads).
     const tool = this.find(/session_summary_add$/);
     if (!tool) return;
@@ -84,7 +84,7 @@ export class DokoroMemory implements Memory {
       key_topics: [],
     });
     try {
-      await this.host.call(tool.name, args);
+      await this.host.call(tool.name, args, signal);
     } catch {
       /* best-effort; never fail the run on a logging error */
     }

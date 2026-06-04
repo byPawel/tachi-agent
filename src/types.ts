@@ -54,8 +54,9 @@ export interface Driver {
 export interface ToolHost {
   /** All available tools across every connected server, namespaced. */
   tools(): AgentTool[];
-  /** Dispatch a namespaced tool call; returns the tool's text result. */
-  call(name: string, args: Record<string, unknown>): Promise<string>;
+  /** Dispatch a namespaced tool call; returns the tool's text result.
+   *  `signal` (optional) aborts an in-flight call — the host also enforces its own timeout. */
+  call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string>;
 }
 
 /**
@@ -64,8 +65,8 @@ export interface ToolHost {
  * and testable, and so memory can be disabled or swapped independently.
  */
 export interface Memory {
-  recall(task: string): Promise<string>;
-  log(entry: { task: string; result: string }): Promise<void>;
+  recall(task: string, signal?: AbortSignal): Promise<string>;
+  log(entry: { task: string; result: string }, signal?: AbortSignal): Promise<void>;
 }
 
 /**

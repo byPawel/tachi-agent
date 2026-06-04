@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nsName, parseNs, isAllowed } from "../mcp.js";
+import { nsName, parseNs, isAllowed, McpToolHost } from "../mcp.js";
 
 describe("nsName", () => {
   it("joins server and tool with an underscore", () => {
@@ -36,5 +36,71 @@ describe("isAllowed", () => {
 
   it("returns true for a prefix match via trailing underscore entry", () => {
     expect(isAllowed("tachibot_jury", ["tachibot_"])).toBe(true);
+  });
+});
+
+/** A fake MCP Client whose callTool hangs until aborted (honours options.signal). */
+function hangingClient() {
+  return {
+    callTool: (_params: unknown, _schema: unknown, options?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () =>
+          reject(new Error("aborted by signal")),
+        );
+        // otherwise: never resolves
+      }),
+    close: async () => {},
+  };
+}
+
+/** Reach into the private clients map to inject a fake without a live transport. */
+function hostWith(server: string, client: unknown, callTimeoutMs?: number): McpToolHost {
+  const host = new McpToolHost({ callTimeoutMs });
+  (host as unknown as { clients: Map<string, unknown> }).clients.set(server, client);
+  return host;
+}
+
+describe("McpToolHost.call timeout", () => {
+  it("rejects when a tool call hangs past the timeout", async () => {
+    const host = hostWith("tachibot", hangingClient(), 30);
+    await expect(host.call("tachibot_jury", { q: "x" })).rejects.toThrow(/timed out/i);
+  });
+
+  it("forwards the caller's signal to the SDK call and aborts the in-flight call", async () => {
+    // GENUINE proof of forwarding: capture the options the host hands to callTool.
+    // (Asserting on the rejection message alone is NOT enough — the host's own
+    // timeout-race promise rejects with `Tool "…" aborted` the moment the caller
+    // aborts and wins the race, so that message would match even if the signal were
+    // never forwarded. The spy below fails unless callTool actually received it.)
+    let forwardedSignal: AbortSignal | undefined;
+    let signalAtAbort = false;
+    const client = {
+      callTool: (_params: unknown, _schema: unknown, options?: { signal?: AbortSignal }) => {
+        forwardedSignal = options?.signal;
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => {
+            signalAtAbort = true; // the forwarded signal actually fired inside callTool
+            reject(new Error("aborted by signal"));
+          });
+        });
+      },
+      close: async () => {},
+    };
+    // Long host timeout so the only thing that can abort the call is the caller signal.
+    const host = hostWith("tachibot", client, 10_000);
+    const ac = new AbortController();
+    const p = host.call("tachibot_jury", { q: "x" }, ac.signal);
+    ac.abort();
+    await expect(p).rejects.toThrow(/abort/i);
+    // The signal reached callTool AND fired through to the SDK call — not dead code.
+    expect(forwardedSignal).toBeInstanceOf(AbortSignal);
+    expect(signalAtAbort).toBe(true);
+  });
+
+  it("uses the configured callTimeoutMs (short timeout fires fast)", async () => {
+    const host = hostWith("tachibot", hangingClient(), 20);
+    const start = Date.now();
+    await expect(host.call("tachibot_jury", {})).rejects.toThrow(/timed out/i);
+    expect(Date.now() - start).toBeLessThan(500);
   });
 });

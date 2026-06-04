@@ -58,6 +58,14 @@ function resolveAllow(optsAllow: string[] | undefined): string[] {
   return DEFAULT_ALLOW;
 }
 
+/** Per-call MCP timeout (ms) from TACHI_CALL_TIMEOUT_MS; undefined → host default (120_000). */
+function resolveCallTimeoutMs(): number | undefined {
+  const raw = process.env.TACHI_CALL_TIMEOUT_MS;
+  if (raw === undefined) return undefined;
+  const ms = Number(raw);
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
 /** Build the wired agent runtime from environment variables. Shared by all front-ends. */
 export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentRuntime> {
   const servers = [
@@ -65,7 +73,7 @@ export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentR
     serverFromEnv("tachibot", process.env.TACHIBOT_CMD),
   ].filter((s): s is McpServerConfig => s !== null);
 
-  const host = new McpToolHost({ allow: resolveAllow(opts.allow) });
+  const host = new McpToolHost({ allow: resolveAllow(opts.allow), callTimeoutMs: resolveCallTimeoutMs() });
   if (servers.length) await host.connect(servers);
 
   const driver = new OllamaDriver();
