@@ -99,6 +99,25 @@ Ctrl-C stops the run cleanly (AbortSignal → halts `aborted`). Progress streams
 - **Default: local CLI** — most private, zero infra, fully on-device.
 - **Gateway (the "orchestration gateway" positioning):** wrap `orchestrator.run` behind a thin service — either a `run_agent` MCP server (Claude Code connects in) or an HTTP/WS gateway (Telegram/Slack webhooks). Put **auth + rate-limit + per-tenant allowlist** in front. **Keep the model local even when the gateway is hosted** — host only the thin orchestrator, not the brain, so the privacy story holds. Any cloud secrets stay in `tachibot-mcp`, not the gateway.
 
+## Gateway API (deploy as a service)
+
+```bash
+export GATEWAY_TOKEN="change-me" GATEWAY_PORT=8787
+export TACHIBOT_CMD="npx -y tachibot-mcp"
+npm run build && node dist/frontends/gateway.js
+```
+
+| Method & path | Purpose |
+|---|---|
+| `POST /runs` `{task, maxIterations?}` | start a run → `202 {run_id}` |
+| `GET /runs/:id` | run state + final result |
+| `GET /runs/:id/events` | **SSE** stream: `step`/`assistant`/`tool-result`/`final`/`error`/`heartbeat` |
+| `DELETE /runs/:id` | cancel (cooperative abort) |
+
+All requests require `Authorization: Bearer <token>`; run IDs are namespaced per tenant.
+Async-job + SSE shape (resilient to disconnects, resumable replay via `id:`). Keep the
+model local even when the gateway is hosted; put rate-limit/quotas at this boundary.
+
 ## Extending (without forking)
 
 ```ts

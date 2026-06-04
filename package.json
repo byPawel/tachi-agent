@@ -6,7 +6,8 @@
   "license": "MIT",
   "bin": {
     "tachi-agent": "dist/cli.js",
-    "tachi-agent-mcp": "dist/frontends/mcp-server.js"
+    "tachi-agent-mcp": "dist/frontends/mcp-server.js",
+    "tachi-agent-gateway": "dist/frontends/gateway.js"
   },
   "exports": { ".": "./dist/index.js" },
   "files": ["dist"],
