@@ -75,11 +75,13 @@ export interface OrchestratorOptions {
   timeoutMs?: number;
   /** Extra system-prompt guidance prepended to the agent's instructions. */
   systemPrompt?: string;
+  /** Cooperative cancellation — abort to stop the agent between steps (e.g. a Slack "/stop" or Ctrl-C). */
+  signal?: AbortSignal;
 }
 
 export interface RunResult {
   answer: string;
   iterations: number;
   toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }>;
-  haltedBy: "final-answer" | "max-iterations" | "timeout";
+  haltedBy: "final-answer" | "max-iterations" | "timeout" | "aborted";
 }

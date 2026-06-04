@@ -73,6 +73,7 @@ export class Orchestrator {
     let iterations = 0;
 
     while (iterations < maxIterations) {
+      if (this.opts.signal?.aborted) { haltedBy = "aborted"; break; }
       if (Date.now() > deadline) { haltedBy = "timeout"; break; }
       iterations++;
 

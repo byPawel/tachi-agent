@@ -63,4 +63,34 @@ npm test       # vitest — core orchestrator, fully mocked
 npm run build  # tsc → dist/
 ```
 
-License: AGPL-3.0
+## Extending (without forking)
+
+```ts
+import { createOrchestrator, registerDriver } from "tachi-agent";
+
+// 1. plug in any brain (OpenClaw, a cloud model, a Kimi-swarm driver)
+registerDriver("openclaw", () => new OpenClawDriver());
+
+// 2. build the hub from a registered name (or a raw Driver instance)
+const agent = createOrchestrator({ driver: "openclaw", host, memory });
+
+// 3. run — and stop it any time
+const controller = new AbortController();
+const result = await createOrchestrator({
+  driver: "openclaw", host, memory,
+  options: { maxIterations: 12, timeoutMs: 90_000, signal: controller.signal },
+}).run("verify HEAD against ADR-1..3");
+// elsewhere: controller.abort()  → run halts with haltedBy: "aborted"
+```
+
+Implement `Driver` / `ToolHost` / `Memory` (see `src/types.ts`) to extend; no core changes.
+
+## Why MIT (not AGPL)
+
+tachi-agent is the **pluggable hub meant to be embedded** by other agents — adoption
+beats protection here, and AGPL would scare off the embedders. The moat lives
+*elsewhere* (dokoro context + tachibot's cross-vendor council it calls), both of
+which it reaches over the MCP wire, so an MIT client and an AGPL `tachibot-mcp`
+server coexist cleanly.
+
+License: MIT
