@@ -5,3 +5,7 @@ coverage/
 .env
 .env.local
 .DS_Store
+
+# dokoro runtime data (memory DB the dokoro server writes into cwd)
+dokoro/
+.focus-sessions/
