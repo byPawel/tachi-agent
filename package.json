@@ -8,7 +8,8 @@
     "tachi-agent": "dist/cli.js",
     "tachi-agent-mcp": "dist/frontends/mcp-server.js",
     "tachi-agent-gateway": "dist/frontends/gateway.js",
-    "tachi-agent-telegram": "dist/frontends/telegram.js"
+    "tachi-agent-telegram": "dist/frontends/telegram.js",
+    "tachi-agent-repl": "dist/frontends/repl.js"
   },
   "exports": { ".": "./dist/index.js" },
   "files": ["dist"],
@@ -19,6 +20,7 @@
     "test:watch": "vitest",
     "dev": "tsx src/index.ts",
     "agent": "tsc && node --env-file=.env dist/cli.js",
+    "repl": "tsc && node --env-file=.env dist/frontends/repl.js",
     "gateway": "tsc && node --env-file=.env dist/frontends/gateway.js"
   },
   "dependencies": {
