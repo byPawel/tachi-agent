@@ -35,6 +35,9 @@ async function main() {
       case "tool-result":
         console.error(`   ↳ ${e.name}: ${e.result.slice(0, 200)}`);
         break;
+      case "cost":
+        if (e.usd > 0) console.error(`💸 est. cost: $${e.usd.toFixed(3)} over ${e.calls} tool call(s)`);
+        break;
       case "final":
         console.error(`\n✅ halted: ${e.haltedBy}`);
         break;
