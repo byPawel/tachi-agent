@@ -14,15 +14,15 @@
   "exports": { ".": "./dist/index.js" },
   "files": ["dist"],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/index.ts",
-    "agent": "tsc && node --env-file=.env dist/cli.js",
-    "repl": "tsc && node --env-file=.env dist/frontends/repl.js",
-    "telegram": "tsc && node --env-file=.env dist/frontends/telegram.js",
-    "gateway": "tsc && node --env-file=.env dist/frontends/gateway.js"
+    "agent": "tsc -p tsconfig.build.json && node --env-file=.env dist/cli.js",
+    "repl": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/repl.js",
+    "telegram": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/telegram.js",
+    "gateway": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/gateway.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
