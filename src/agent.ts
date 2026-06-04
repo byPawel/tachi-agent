@@ -68,6 +68,7 @@ export class Orchestrator {
     ];
 
     // 2. REASON+ACT — the ReAct loop, with hard HALT guards.
+    const emit = this.opts.onEvent ?? (() => {});
     let haltedBy: RunResult["haltedBy"] = "max-iterations";
     let answer = "";
     let iterations = 0;
@@ -76,8 +77,10 @@ export class Orchestrator {
       if (this.opts.signal?.aborted) { haltedBy = "aborted"; break; }
       if (Date.now() > deadline) { haltedBy = "timeout"; break; }
       iterations++;
+      emit({ type: "step", iteration: iterations });
 
       const res = await this.driver.chat({ messages, tools });
+      emit({ type: "assistant", content: res.content, toolCalls: res.toolCalls });
 
       if (!res.toolCalls.length) {
         answer = res.content;
@@ -89,6 +92,7 @@ export class Orchestrator {
       messages.push({ role: "assistant", content: res.content, toolCalls: res.toolCalls });
       for (const tc of res.toolCalls) {
         const result = await this.dispatch(tc, tools);
+        emit({ type: "tool-result", name: tc.name, result });
         toolCalls.push({ name: tc.name, args: tc.arguments, result });
         messages.push({ role: "tool", content: result, toolCallId: tc.name });
       }
@@ -101,6 +105,7 @@ export class Orchestrator {
     // 3. LOG — persist the outcome back to dokoro so the next run remembers.
     if (this.memory) await safe(() => this.memory!.log({ task, result: answer }), undefined);
 
+    emit({ type: "final", answer, haltedBy });
     return { answer, iterations, toolCalls, haltedBy };
   }
 

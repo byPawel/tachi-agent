@@ -63,6 +63,42 @@ npm test       # vitest — core orchestrator, fully mocked
 npm run build  # tsc → dist/
 ```
 
+## Run
+
+```bash
+# 1. local brain
+ollama serve &           # start Ollama
+ollama pull qwen2.5      # tool-calling model (Qwen2.5 > Hermes for tool calls)
+
+# 2. point at your MCP servers (council + memory)
+export TACHIBOT_CMD="npx -y tachibot-mcp"
+export DOKORO_CMD="npx -y @devlog-mcp/core"   # optional; omit to run tachibot-only
+
+# 3. build + run
+npm install && npm run build
+node dist/cli.js "verify HEAD against ADR-1..3"
+# dev mode:  npm run dev -- "your task"
+```
+
+Ctrl-C stops the run cleanly (AbortSignal → halts `aborted`). Progress streams to **stderr**; the final answer prints to **stdout**.
+
+## Security
+
+- **Local-first is the security posture.** Default brain is local Qwen2.5 (Ollama bound to `127.0.0.1`, no SSRF); tools run over local stdio. tachi-agent holds **no cloud keys** — the council's provider keys live in `tachibot-mcp`, so the agent's own secret surface is ~zero.
+- **Trust boundary:** MCP server commands come ONLY from config/env (`*_CMD`), never from a user or model message — no command injection. The `McpToolHost({ allow })` allowlist keeps write/dangerous tools out unless explicitly granted.
+- **Untrusted front-ends (Telegram/Slack/HTTP):** authenticate at the edge (Telegram allowed user-ids, Slack signing secret, localhost-only MCP). The task string is *data*; the agent can only call whitelisted tools — never arbitrary shell.
+- **Prompt injection:** search/tool results fed back may carry injection. Mitigate with a bounded tool allowlist (no shell/file-write by default), treating tool output as untrusted data, and approval gates for any write tool (roadmap).
+
+## Multi-tenant
+
+- **One `Orchestrator` + one `AbortController` + one dokoro session/workspace id per tenant.** The orchestrator is stateless between runs, so N tenants = N independent `run()` calls with no shared state.
+- Don't share memory across tenants — scope dokoro recall/log by tenant session id. Use per-tenant tool allowlists and per-tenant `maxIterations` / `timeoutMs` as rate/cost limits.
+
+## Deploy
+
+- **Default: local CLI** — most private, zero infra, fully on-device.
+- **Gateway (the "orchestration gateway" positioning):** wrap `orchestrator.run` behind a thin service — either a `run_agent` MCP server (Claude Code connects in) or an HTTP/WS gateway (Telegram/Slack webhooks). Put **auth + rate-limit + per-tenant allowlist** in front. **Keep the model local even when the gateway is hosted** — host only the thin orchestrator, not the brain, so the privacy story holds. Any cloud secrets stay in `tachibot-mcp`, not the gateway.
+
 ## Extending (without forking)
 
 ```ts

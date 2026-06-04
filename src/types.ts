@@ -68,6 +68,16 @@ export interface Memory {
   log(entry: { task: string; result: string }): Promise<void>;
 }
 
+/**
+ * Streamed progress events. Front-ends (CLI, Telegram, Slack, Claude Code) render
+ * these live instead of waiting for the final answer.
+ */
+export type AgentEvent =
+  | { type: "step"; iteration: number }
+  | { type: "assistant"; content: string; toolCalls: ToolCall[] }
+  | { type: "tool-result"; name: string; result: string }
+  | { type: "final"; answer: string; haltedBy: RunResult["haltedBy"] };
+
 export interface OrchestratorOptions {
   /** Hard stop on the ReAct loop. Default 10. */
   maxIterations?: number;
@@ -77,6 +87,8 @@ export interface OrchestratorOptions {
   systemPrompt?: string;
   /** Cooperative cancellation — abort to stop the agent between steps (e.g. a Slack "/stop" or Ctrl-C). */
   signal?: AbortSignal;
+  /** Streaming hook — called as the run progresses, for live front-end output. */
+  onEvent?: (event: AgentEvent) => void;
 }
 
 export interface RunResult {
