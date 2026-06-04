@@ -23,4 +23,15 @@ describe("estimateCost", () => {
   it("is 0 for an empty run", () => {
     expect(estimateCost([])).toBe(0);
   });
+
+  it("charges the default cost for a tool named like an Object.prototype key (no poisoned sum)", () => {
+    // `name in TOOL_COST_USD` also matches inherited prototype keys, so a tool
+    // literally named "toString" would resolve to the inherited function → NaN →
+    // the finiteness guard would zero the WHOLE run. The lookup must use
+    // Object.hasOwn so such a name falls back to the default per-tool cost.
+    const usd = estimateCost([{ name: "toString", args: {}, result: "" }]);
+    expect(Number.isFinite(usd)).toBe(true);
+    expect(usd).toBeGreaterThan(0);
+    expect(usd).toBeCloseTo(0.01, 5);
+  });
 });

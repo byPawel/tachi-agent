@@ -23,7 +23,9 @@ export const TOOL_COST_USD: Record<string, number> = {
 const DEFAULT_TOOL_COST_USD = 0.01;
 
 function costForTool(name: string): number {
-  if (name in TOOL_COST_USD) return TOOL_COST_USD[name];
+  // Object.hasOwn (not `in`) so a tool named like an inherited prototype key
+  // (e.g. "toString") doesn't resolve to a function → NaN → a poisoned run sum.
+  if (Object.hasOwn(TOOL_COST_USD, name)) return TOOL_COST_USD[name];
   // dokoro/local namespaces are free; everything else assumed a small cloud call.
   if (name.startsWith("dokoro_")) return 0;
   return DEFAULT_TOOL_COST_USD;

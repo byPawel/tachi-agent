@@ -24,6 +24,15 @@ export interface McpToolHostOptions {
   callTimeoutMs?: number;
 }
 
+/**
+ * Headroom (ms) added to the host's authoritative timeout when arming the MCP
+ * SDK's own per-request timer. The SDK ALWAYS arms a timer (its hidden default is
+ * DEFAULT_REQUEST_TIMEOUT_MSEC = 60_000); passing an explicit value just beyond
+ * the host deadline keeps the SDK from independently preempting long calls at 60s,
+ * while letting the host's AbortController remain the primary timeout authority.
+ */
+export const SDK_TIMEOUT_BACKSTOP_MS = 5_000;
+
 export function nsName(server: string, tool: string): string {
   return `${server}_${tool}`;
 }
@@ -85,12 +94,19 @@ export class McpToolHost implements ToolHost {
 
     const timeoutMs = this.opts.callTimeoutMs ?? 120_000;
 
-    // ONE timeout authority: our own AbortController. The caller's signal and our
-    // timer both abort it; that single abort both cancels the SDK call (forwarded
+    // PRIMARY timeout authority: our own AbortController. The caller's signal and
+    // our timer both abort it; that single abort both cancels the SDK call (forwarded
     // as `signal`, so the server gets a cancellation notification) AND settles our
-    // race promise with one deterministic, distinguishable error. We deliberately
-    // do NOT pass the SDK's native `timeout` — racing two deadlines would yield a
-    // nondeterministic error message.
+    // race promise with one deterministic, distinguishable error.
+    //
+    // The MCP SDK ALWAYS arms its own per-request timer (hidden default
+    // DEFAULT_REQUEST_TIMEOUT_MSEC = 60_000). If we passed only `signal`, the SDK
+    // would independently fire at 60s — silently capping any callTimeoutMs > 60_000
+    // (the default is 120_000) and stealing the race with its own "Request timed
+    // out" message. So we pass an explicit `timeout = timeoutMs + backstop`: the
+    // SDK timer becomes a BACKSTOP just beyond our authoritative deadline, never the
+    // active deadline. In practice our AbortController always wins first, so the
+    // deterministic message and the abort-vs-timeout distinction are preserved.
     const timeoutAc = new AbortController();
     const onCallerAbort = () => timeoutAc.abort();
     signal?.addEventListener("abort", onCallerAbort, { once: true });
@@ -109,6 +125,7 @@ export class McpToolHost implements ToolHost {
       const res = (await Promise.race([
         client.callTool({ name: tool, arguments: args }, undefined, {
           signal: timeoutAc.signal,
+          timeout: timeoutMs + SDK_TIMEOUT_BACKSTOP_MS,
         }),
         timeout,
       ])) as { content?: Array<{ type?: string; text?: string }> };

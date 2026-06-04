@@ -103,4 +103,25 @@ describe("McpToolHost.call timeout", () => {
     await expect(host.call("tachibot_jury", {})).rejects.toThrow(/timed out/i);
     expect(Date.now() - start).toBeLessThan(500);
   });
+
+  it("passes an explicit SDK timeout >= the configured callTimeoutMs (no hidden 60s cap)", async () => {
+    // The MCP SDK ALWAYS arms its own per-request timer (DEFAULT_REQUEST_TIMEOUT_MSEC
+    // = 60_000). If the host forwards only `signal` and no `timeout`, the SDK would
+    // independently preempt any long call at 60s — silently capping callTimeoutMs.
+    // The host must pass an explicit `timeout` so the SDK's timer is a backstop just
+    // beyond the host's authoritative deadline, never below it.
+    let forwardedTimeout: unknown;
+    const client = {
+      callTool: (_params: unknown, _schema: unknown, options?: { timeout?: number }) => {
+        forwardedTimeout = options?.timeout;
+        // Resolve immediately so the host returns normally; we only inspect options.
+        return Promise.resolve({ content: [{ type: "text", text: "ok" }] });
+      },
+      close: async () => {},
+    };
+    const host = hostWith("tachibot", client, 90_000);
+    await host.call("tachibot_jury", { q: "x" });
+    expect(typeof forwardedTimeout).toBe("number");
+    expect(forwardedTimeout as number).toBeGreaterThanOrEqual(90_000);
+  });
 });
