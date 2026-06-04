@@ -4,9 +4,11 @@
  *
  * Long-polls the Telegram Bot API (no external dependencies — native fetch only)
  * and routes every allowed user's message through the singleton AgentRuntime.
- * Security: allowlist-only. Empty TELEGRAM_ALLOWED_USER_IDS → refuses to start.
+ * Streams progress by EDITING the "working…" message as steps/tools fire, then
+ * edits it into the Markdown-formatted final answer. Security: allowlist-only.
  */
 import { buildAgentFromEnv } from "../runtime.js";
+import type { AgentEvent } from "../types.js";
 
 // ─── Pure helpers (exported for unit tests — no I/O, no network) ───────────
 
@@ -21,10 +23,7 @@ export function parseAllowedIds(env: string | undefined): Set<number> {
   return ids;
 }
 
-/**
- * Returns true only when the allowlist is non-empty AND contains userId.
- * Fail-closed: empty allowlist → deny all.
- */
+/** Fail-closed: empty allowlist → deny all. */
 export function isAuthorized(userId: number | undefined, allowed: Set<number>): boolean {
   return allowed.size > 0 && userId !== undefined && allowed.has(userId);
 }
@@ -41,16 +40,22 @@ export function extractMessage(
   return { chatId, userId, text: msg.text };
 }
 
+/**
+ * Convert the model's standard Markdown to Telegram "Markdown" (legacy):
+ * `**bold**` → `*bold*`, `### heading` → `*heading*`. Telegram legacy mode is
+ * lenient about `(). -` etc.; a parse failure falls back to plain text.
+ */
+export function toTelegramMarkdown(md: string): string {
+  return md
+    .replace(/\*\*(.+?)\*\*/gs, "*$1*")       // **bold** → *bold*
+    .replace(/^#{1,6}\s+(.+)$/gm, "*$1*");    // # heading → *heading*
+}
+
 // ─── Telegram API helpers ───────────────────────────────────────────────────
 
 const BASE = (token: string) => `https://api.telegram.org/bot${token}`;
 
-/** Long-poll for updates; offset excludes already-seen update IDs. */
-export async function getUpdates(
-  token: string,
-  offset: number,
-  signal?: AbortSignal,
-): Promise<any[]> {
+export async function getUpdates(token: string, offset: number, signal?: AbortSignal): Promise<any[]> {
   const res = await fetch(`${BASE(token)}/getUpdates`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -61,81 +66,95 @@ export async function getUpdates(
   return data.result ?? [];
 }
 
-/** Send a plain-text message to a chat. */
-export async function sendMessage(token: string, chatId: number, text: string): Promise<void> {
-  await fetch(`${BASE(token)}/sendMessage`, {
+/** Send a message; returns its message_id (for later edits) or undefined. */
+export async function sendMessage(
+  token: string, chatId: number, text: string, parseMode?: "Markdown",
+): Promise<number | undefined> {
+  const res = await fetch(`${BASE(token)}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    body: JSON.stringify({ chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}) }),
   });
+  const data = (await res.json()) as { ok: boolean; result?: { message_id: number } };
+  return data.result?.message_id;
+}
+
+/** Edit a message; returns true if Telegram accepted it. */
+export async function editMessage(
+  token: string, chatId: number, messageId: number, text: string, parseMode?: "Markdown",
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE(token)}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, ...(parseMode ? { parse_mode: parseMode } : {}) }),
+    });
+    const data = (await res.json()) as { ok: boolean };
+    return data.ok === true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    console.error("TELEGRAM_BOT_TOKEN is required");
-    process.exit(1);
-  }
+  if (!token) { console.error("TELEGRAM_BOT_TOKEN is required"); process.exit(1); }
 
   const allowed = parseAllowedIds(process.env.TELEGRAM_ALLOWED_USER_IDS);
-  if (allowed.size === 0) {
-    console.error("Refusing to start without TELEGRAM_ALLOWED_USER_IDS");
-    process.exit(1);
-  }
+  if (allowed.size === 0) { console.error("Refusing to start without TELEGRAM_ALLOWED_USER_IDS"); process.exit(1); }
 
-  // Build singleton runtime — connects MCP servers once, reused for every message.
-  const runtime = await buildAgentFromEnv();
+  const runtime = await buildAgentFromEnv(); // singleton — reused for every message
   console.error(`tachi-agent Telegram bot ready · ${runtime.toolCount} downstream tools`);
 
-  // Graceful shutdown.
-  const shutdown = async () => {
-    try { await runtime.close(); } finally { process.exit(0); }
-  };
+  const shutdown = async () => { try { await runtime.close(); } finally { process.exit(0); } };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  // Long-poll loop.
   let offset = 0;
   while (true) {
     let updates: any[];
-    try {
-      updates = await getUpdates(token, offset);
-    } catch (e) {
-      console.error("getUpdates error:", e);
-      continue;
-    }
+    try { updates = await getUpdates(token, offset); }
+    catch (e) { console.error("getUpdates error:", e); continue; }
 
     for (const update of updates) {
-      // Always advance offset so we don't re-process this update.
       offset = update.update_id + 1;
-
       const msg = extractMessage(update);
       if (!msg) continue;
+      if (!isAuthorized(msg.userId, allowed)) { console.error(`ignored unauthorized user ${msg.userId}`); continue; }
 
-      if (!isAuthorized(msg.userId, allowed)) {
-        console.error(`ignored unauthorized user ${msg.userId}`);
-        continue;
-      }
-
-      // Handle each message independently so one error doesn't kill the loop.
-      (async () => {
+      // Handle each message independently so one error can't kill the loop.
+      void (async () => {
+        const statusId = await sendMessage(token, msg.chatId, "🤔 working…");
+        let lastEdit = 0;
+        const setStatus = (s: string) => {
+          const now = Date.now();
+          if (statusId === undefined || now - lastEdit < 1200) return; // throttle (Telegram rate limit)
+          lastEdit = now;
+          void editMessage(token, msg.chatId, statusId, s);
+        };
+        const onEvent = (e: AgentEvent) => {
+          if (e.type === "assistant" && e.toolCalls.length) setStatus(`🔧 ${e.toolCalls.map((c) => c.name).join(", ")}…`);
+          else if (e.type === "step") setStatus(`🤔 thinking… (step ${e.iteration})`);
+        };
         try {
-          await sendMessage(token, msg.chatId, "🤔 working…");
-          const res = await runtime
-            .orchestrator({ maxIterations: 8, timeoutMs: 90_000 })
-            .run(msg.text);
-          await sendMessage(token, msg.chatId, res.answer);
+          const res = await runtime.orchestrator({ maxIterations: 10, timeoutMs: 180_000, onEvent }).run(msg.text);
+          const answer = res.answer.startsWith("[halted")
+            ? `⏱ Stopped early (${res.haltedBy}). A deep council on a local model can take a while — try a simpler ask, or send it again.`
+            : res.answer;
+          const formatted = toTelegramMarkdown(answer) || "(no answer produced)";
+          // Edit the status bubble into the formatted answer; fall back to plain on parse failure.
+          const edited = statusId !== undefined && (await editMessage(token, msg.chatId, statusId, formatted, "Markdown"));
+          if (!edited) await sendMessage(token, msg.chatId, res.answer); // plain fallback
         } catch (e) {
-          console.error("message handler error:", e);
           const errText = e instanceof Error ? e.message : String(e);
-          await sendMessage(token, msg.chatId, `⚠️ Error: ${errText}`).catch(() => {});
+          if (statusId !== undefined) await editMessage(token, msg.chatId, statusId, `⚠️ Error: ${errText}`);
+          else await sendMessage(token, msg.chatId, `⚠️ Error: ${errText}`).catch(() => {});
         }
       })();
     }
   }
 }
 
-// Run only when executed directly (not when imported by tests).
 if (import.meta.url === `file://${process.argv[1]}`) main().catch((e) => { console.error(e); process.exit(1); });

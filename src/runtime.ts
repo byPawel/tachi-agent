@@ -42,14 +42,13 @@ export const DEFAULT_ALLOW = [
   "tachibot_grok_search",
   "tachibot_perplexity_ask",
   "tachibot_gemini_judge",
-  // dokoro memory — include both naming variants (bare + legacy devlog_); only the
-  // ones the connected server actually exposes will match. DokoroMemory discovers
-  // them by suffix, so whichever exists is used for recall/log.
-  "dokoro_session_recall",
-  "dokoro_session_log",
-  "dokoro_workspace_status",
-  "dokoro_devlog_session_recall",
-  "dokoro_devlog_session_log",
+  // dokoro memory — REAL namespaced names. The dokoro package self-prefixes its
+  // tools with `dokoro_`, and the ToolHost namespaces with the server name `dokoro`,
+  // so they arrive double-prefixed: `dokoro_dokoro_session_recall`. DokoroMemory
+  // still discovers recall/log by the `…session_recall`/`…session_log` suffix.
+  "dokoro_dokoro_session_recall",
+  "dokoro_dokoro_session_log",
+  "dokoro_dokoro_workspace_status",
 ];
 
 function resolveAllow(optsAllow: string[] | undefined): string[] {

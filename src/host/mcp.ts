@@ -46,7 +46,14 @@ export class McpToolHost implements ToolHost {
 
   async connect(servers: McpServerConfig[]): Promise<void> {
     for (const s of servers) {
-      const transport = new StdioClientTransport({ command: s.command, args: s.args ?? [], env: s.env });
+      const transport = new StdioClientTransport({
+        command: s.command,
+        args: s.args ?? [],
+        env: s.env,
+        // Suppress child-server stderr (heartbeats/startup noise) so it doesn't
+        // flood the CLI/REPL. Set TACHI_DEBUG to see it for troubleshooting.
+        stderr: process.env.TACHI_DEBUG ? "inherit" : "ignore",
+      });
       const client = new Client({ name: "tachi-agent", version: "0.1.0" }, { capabilities: {} });
       await client.connect(transport);
       this.clients.set(s.name, client);
