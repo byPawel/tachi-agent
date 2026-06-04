@@ -51,6 +51,19 @@ export function toTelegramMarkdown(md: string): string {
     .replace(/^#{1,6}\s+(.+)$/gm, "*$1*");    // # heading → *heading*
 }
 
+/** Emoji for a (namespaced) tool name — used in the live Telegram step tracker. */
+export function toolEmoji(name: string): string {
+  if (name.includes("jury")) return "⚖️";
+  if (name.includes("council")) return "🏛️";
+  if (name.includes("grok_search") || name.includes("search")) return "🔍";
+  if (name.includes("perplexity") || name.includes("ask")) return "🔎";
+  if (name.includes("judge")) return "🧑‍⚖️";
+  if (name.includes("recall")) return "🧠";
+  if (name.includes("log")) return "💾";
+  if (name.includes("reason") || name.includes("think")) return "🤔";
+  return "🔧";
+}
+
 // ─── Telegram API helpers ───────────────────────────────────────────────────
 
 const BASE = (token: string) => `https://api.telegram.org/bot${token}`;
@@ -127,16 +140,23 @@ async function main(): Promise<void> {
       // Handle each message independently so one error can't kill the loop.
       void (async () => {
         const statusId = await sendMessage(token, msg.chatId, "🤔 working…");
+        const steps: string[] = [];
         let lastEdit = 0;
-        const setStatus = (s: string) => {
+        // Plain text (no parse_mode) — tool names contain underscores that would break
+        // Telegram Markdown. Emoji render fine in plain text; the FINAL answer uses Markdown.
+        const flush = () => {
           const now = Date.now();
-          if (statusId === undefined || now - lastEdit < 1200) return; // throttle (Telegram rate limit)
+          if (statusId === undefined || now - lastEdit < 1200) return; // throttle (Telegram edit rate limit)
           lastEdit = now;
-          void editMessage(token, msg.chatId, statusId, s);
+          void editMessage(token, msg.chatId, statusId, `🤔 working…\n${steps.join("\n")}`);
         };
         const onEvent = (e: AgentEvent) => {
-          if (e.type === "assistant" && e.toolCalls.length) setStatus(`🔧 ${e.toolCalls.map((c) => c.name).join(", ")}…`);
-          else if (e.type === "step") setStatus(`🤔 thinking… (step ${e.iteration})`);
+          if (e.type === "step") steps.push(`⚙️ step ${e.iteration}`);
+          else if (e.type === "assistant" && e.toolCalls.length)
+            for (const c of e.toolCalls) steps.push(`${toolEmoji(c.name)} ${c.name}…`);
+          else if (e.type === "tool-result") steps.push(`   ✅ ${e.name}`);
+          else return;
+          flush();
         };
         try {
           const res = await runtime.orchestrator({ maxIterations: 10, timeoutMs: 180_000, onEvent }).run(msg.text);
