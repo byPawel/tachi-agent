@@ -9,3 +9,6 @@ coverage/
 # dokoro runtime data (memory DB the dokoro server writes into cwd)
 dokoro/
 .focus-sessions/
+
+# superpowers planning docs — local working files, not tracked
+docs/superpowers/plans/
