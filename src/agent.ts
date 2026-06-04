@@ -14,6 +14,7 @@ import type {
   Driver, ToolHost, Memory, ChatMessage, ToolCall, AgentTool,
   RunResult, OrchestratorOptions,
 } from "./types.js";
+import { needsGroundingSearch } from "./router.js";
 
 const BASE_SYSTEM = `You are TachiAgent, a local-first orchestration agent driving a ReAct loop.
 Your tools come from two sources:
@@ -66,13 +67,29 @@ export class Orchestrator {
     // 1. RECALL — pull relevant prior context from dokoro before reasoning.
     const recalled = this.memory ? await safe(() => this.memory!.recall(task), "") : "";
 
+    // 1b. ROUTER (deterministic) — force a grounding SEARCH for entity/URL questions
+    // so the model can't describe a named entity from (hallucinated) priors.
+    let grounding = "";
+    if (needsGroundingSearch(task)) {
+      const searchTool = tools.find((t) => /grok_search$|perplexity_ask$/.test(t.name));
+      if (searchTool) {
+        const result = await safe(() => this.host.call(searchTool.name, { query: task }), "");
+        if (result) {
+          grounding = `\n\n--- Grounding search results (base ALL facts about named entities/URLs on THIS; if it does not contain the answer, say you couldn't find it — do NOT invent) ---\n${result}`;
+          toolCalls.push({ name: searchTool.name, args: { query: task }, result });
+          this.opts.onEvent?.({ type: "tool-result", name: searchTool.name, result });
+        }
+      }
+    }
+
     const messages: ChatMessage[] = [
       {
         role: "system",
         content:
           (this.opts.systemPrompt ? this.opts.systemPrompt + "\n\n" : "") +
           BASE_SYSTEM +
-          (recalled ? `\n\n--- Relevant prior context (memory) ---\n${recalled}` : ""),
+          (recalled ? `\n\n--- Relevant prior context (memory) ---\n${recalled}` : "") +
+          grounding,
       },
       { role: "user", content: task },
     ];
