@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 /** CLI entry point — progress to stderr, final answer to stdout. */
-import { Orchestrator } from "./agent.js";
-import { OllamaDriver } from "./drivers/ollama.js";
-import { McpToolHost, type McpServerConfig } from "./host/mcp.js";
-import { DokoroMemory } from "./memory/dokoro.js";
+import { buildAgentFromEnv } from "./runtime.js";
 import type { AgentEvent } from "./types.js";
 
 async function main() {
@@ -13,25 +10,9 @@ async function main() {
     process.exit(1);
   }
 
-  const servers: McpServerConfig[] = [];
-
-  const dokoroVal = process.env.DOKORO_CMD;
-  if (dokoroVal && dokoroVal.trim()) {
-    const [command, ...args] = dokoroVal.trim().split(/\s+/);
-    servers.push({ name: "dokoro", command, args });
-  }
-
-  const tachibotVal = process.env.TACHIBOT_CMD;
-  if (tachibotVal && tachibotVal.trim()) {
-    const [command, ...args] = tachibotVal.trim().split(/\s+/);
-    servers.push({ name: "tachibot", command, args });
-  }
-
-  const host = new McpToolHost();
-  if (servers.length) await host.connect(servers);
-
-  const driver = new OllamaDriver();
-  const memory = servers.some((s) => s.name === "dokoro") ? new DokoroMemory(host) : undefined;
+  // Shared wiring: OllamaDriver + McpToolHost (dokoro+tachibot, with the default
+  // tool allowlist so a small local model isn't drowned in ~70 tools) + DokoroMemory.
+  const rt = await buildAgentFromEnv();
 
   const controller = new AbortController();
   process.on("SIGINT", () => {
@@ -60,15 +41,13 @@ async function main() {
     }
   };
 
-  const orch = new Orchestrator(driver, host, memory, { signal: controller.signal, onEvent });
-
-  console.error(`🤖 tachi-agent (${driver.name}) · ${host.tools().length} tools · task: ${task}`);
+  console.error(`🤖 tachi-agent (${rt.driver.name}) · ${rt.toolCount} tools · task: ${task}`);
 
   try {
-    const res = await orch.run(task);
+    const res = await rt.orchestrator({ signal: controller.signal, onEvent }).run(task);
     console.log("\n" + res.answer); // final answer to STDOUT (progress went to stderr)
   } finally {
-    await host.close(); // always tear down MCP child processes
+    await rt.close(); // always tear down MCP child processes
   }
 }
 

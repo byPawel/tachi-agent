@@ -3,7 +3,7 @@
  * builds the agent the same way from env, so the wiring lives in ONE place.
  */
 import { OllamaDriver } from "./drivers/ollama.js";
-import { McpToolHost, type McpServerConfig, type McpToolHostOptions } from "./host/mcp.js";
+import { McpToolHost, type McpServerConfig } from "./host/mcp.js";
 import { DokoroMemory } from "./memory/dokoro.js";
 import { Orchestrator } from "./agent.js";
 import type { Driver, Memory, OrchestratorOptions } from "./types.js";
@@ -30,6 +30,35 @@ export interface BuildOptions {
   allow?: string[];
 }
 
+/**
+ * Default tool allowlist — keeps the local-model driver FOCUSED. A 3–8B local
+ * model degrades badly when handed all ~70 tools from both servers (it returns
+ * empty/garbage), so by default we expose only the council + search + memory
+ * tools the depth-1 loop actually needs. Override with TACHI_ALLOW (comma-separated
+ * names/prefixes); set TACHI_ALLOW="tachibot_,dokoro_" (or "") to expose everything.
+ */
+export const DEFAULT_ALLOW = [
+  "tachibot_jury",
+  "tachibot_grok_search",
+  "tachibot_perplexity_ask",
+  "tachibot_gemini_judge",
+  // dokoro memory — include both naming variants (bare + legacy devlog_); only the
+  // ones the connected server actually exposes will match. DokoroMemory discovers
+  // them by suffix, so whichever exists is used for recall/log.
+  "dokoro_session_recall",
+  "dokoro_session_log",
+  "dokoro_workspace_status",
+  "dokoro_devlog_session_recall",
+  "dokoro_devlog_session_log",
+];
+
+function resolveAllow(optsAllow: string[] | undefined): string[] {
+  if (optsAllow) return optsAllow;
+  const env = process.env.TACHI_ALLOW;
+  if (env !== undefined) return env.split(",").map((s) => s.trim()).filter(Boolean);
+  return DEFAULT_ALLOW;
+}
+
 /** Build the wired agent runtime from environment variables. Shared by all front-ends. */
 export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentRuntime> {
   const servers = [
@@ -37,8 +66,7 @@ export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentR
     serverFromEnv("tachibot", process.env.TACHIBOT_CMD),
   ].filter((s): s is McpServerConfig => s !== null);
 
-  const hostOpts: McpToolHostOptions = opts.allow ? { allow: opts.allow } : {};
-  const host = new McpToolHost(hostOpts);
+  const host = new McpToolHost({ allow: resolveAllow(opts.allow) });
   if (servers.length) await host.connect(servers);
 
   const driver = new OllamaDriver();
