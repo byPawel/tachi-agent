@@ -19,3 +19,31 @@ const ENTITY_ASK = /\b(tell me about|info(?:rmation)? on|details on|look up|sear
 export function needsGroundingSearch(query: string): boolean {
   return DOMAIN.test(query) || WHAT_IS.test(query) || ENTITY_ASK.test(query);
 }
+
+/**
+ * Decision/architecture intents the WEAK local planner must not answer alone.
+ * Force a multi-model council consult (tachibot_tachi → architect/judge) instead.
+ * Deterministic patterns only — no LLM classifier (mirrors needsGroundingSearch).
+ */
+const COMPARE = /\b(compare|versus|vs\.?|trade-?offs?|pros and cons|better than)\b/i;
+// `should (i|we|you)` — "should we use X" is the most natural team framing of an
+// engineering decision and is exactly what the council is for (was a false-negative
+// when limited to "should i"). The `which …` branch is anchored to a comparative
+// verdict word (better/best/right/preferable) so generic chat like "which color is
+// nicer", "which one is correct", or "which file should I open" does NOT route to a
+// cost-bearing consult.
+const DECISION =
+  /\bshould (?:i|we|you) (?:use|pick|choose|go with)\b|\bwhich (?:\w+ )?(?:is|are|should) (?:better|best|right|preferable|the right|the best)\b/i;
+// `design` is anchored to an article + an architecture-ish noun so it does NOT fire on
+// generation tasks ("design a function/logo") or incidental mentions ("the design is
+// nice", "this design works") — those contradict this router's no-generation intent.
+const ARCHITECT =
+  /\b(?:architect(?:ure)?|design (?:the|a|an) (?:system|service|schema|api|db|database|auth|architecture|infra(?:structure)?|pipeline|data ?model|module)|best (?:approach|way|option|choice|stack|design))\b/i;
+
+/**
+ * True when the query is a comparison / tradeoff / architecture / design decision —
+ * route it to the council (tachibot_tachi) rather than the local model's priors.
+ */
+export function needsCouncil(query: string): boolean {
+  return COMPARE.test(query) || DECISION.test(query) || ARCHITECT.test(query);
+}
