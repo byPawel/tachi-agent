@@ -47,3 +47,27 @@ export function extractSlackMessage(
   if (text === "") return null;
   return { channel, userId, text };
 }
+
+/**
+ * Convert the model's standard Markdown to Slack "mrkdwn":
+ * `**bold**` → `*bold*`, `### heading` → `*heading*`, `[t](u)` → `<u|t>`.
+ */
+export function toSlackMrkdwn(md: string): string {
+  return md
+    .replace(/\*\*(.+?)\*\*/gs, "*$1*")                     // **bold** → *bold*
+    .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")                   // # heading → *heading*
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "<$2|$1>"); // [t](u) → <u|t>
+}
+
+/** Emoji for a (namespaced) tool name — used in the live Slack step tracker. */
+export function toolEmoji(name: string): string {
+  if (name.includes("jury")) return "⚖️";
+  if (name.includes("council")) return "🏛️";
+  if (name.includes("grok_search") || name.includes("search")) return "🔍";
+  if (name.includes("perplexity") || name.includes("ask")) return "🔎";
+  if (name.includes("judge")) return "🧑‍⚖️";
+  if (name.includes("recall")) return "🧠";
+  if (name.includes("log")) return "💾";
+  if (name.includes("reason") || name.includes("think")) return "🤔";
+  return "🔧";
+}

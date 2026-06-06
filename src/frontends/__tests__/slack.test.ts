@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseAllowedSlackIds, isSlackAuthorized, extractSlackMessage } from "../slack.js";
+import { parseAllowedSlackIds, isSlackAuthorized, extractSlackMessage, toSlackMrkdwn } from "../slack.js";
 
 describe("parseAllowedSlackIds", () => {
   it("parses a comma-separated list of string ids", () => {
@@ -53,5 +53,20 @@ describe("extractSlackMessage", () => {
   });
   it("returns null for a non-message event type", () => {
     expect(extractSlackMessage({ type: "reaction_added", channel: "C1", user: "U7" })).toBeNull();
+  });
+});
+
+describe("toSlackMrkdwn", () => {
+  it("converts **bold** to *bold*", () => {
+    expect(toSlackMrkdwn("a **b** c")).toBe("a *b* c");
+  });
+  it("converts a markdown heading to bold", () => {
+    expect(toSlackMrkdwn("### Title")).toBe("*Title*");
+  });
+  it("converts [text](url) to <url|text>", () => {
+    expect(toSlackMrkdwn("see [docs](https://x.io)")).toBe("see <https://x.io|docs>");
+  });
+  it("leaves plain text untouched", () => {
+    expect(toSlackMrkdwn("just words")).toBe("just words");
   });
 });
