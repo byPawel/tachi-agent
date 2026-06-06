@@ -9,6 +9,7 @@
     "tachi-agent-mcp": "dist/frontends/mcp-server.js",
     "tachi-agent-gateway": "dist/frontends/gateway.js",
     "tachi-agent-telegram": "dist/frontends/telegram.js",
+    "tachi-agent-slack": "dist/frontends/slack.js",
     "tachi-agent-repl": "dist/frontends/repl.js"
   },
   "exports": { ".": "./dist/index.js" },
@@ -22,6 +23,7 @@
     "agent": "tsc -p tsconfig.build.json && node --env-file=.env dist/cli.js",
     "repl": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/repl.js",
     "telegram": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/telegram.js",
+    "slack": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/slack.js",
     "gateway": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/gateway.js"
   },
   "dependencies": {
