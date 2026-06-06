@@ -48,12 +48,26 @@ export function extractSlackMessage(
   return { channel, userId, text };
 }
 
+/** Slack rejects very long `text`; truncate so a long answer still sends. */
+export const SLACK_TEXT_LIMIT = 39000;
+
+/** Truncate text to fit Slack's message limit, appending a marker when cut. */
+export function truncateForSlack(text: string): string {
+  if (text.length <= SLACK_TEXT_LIMIT) return text;
+  return text.slice(0, SLACK_TEXT_LIMIT - 20) + "\n…[truncated]";
+}
+
 /**
  * Convert the model's standard Markdown to Slack "mrkdwn":
  * `**bold**` → `*bold*`, `### heading` → `*heading*`, `[t](u)` → `<u|t>`.
+ * Literal `<`/`>` in the body are escaped FIRST so they can't inject Slack
+ * tags; the link rule then emits its own `<url|text>` tags afterward. `&` is
+ * left untouched to avoid corrupting `&`-containing URLs/query strings.
  */
 export function toSlackMrkdwn(md: string): string {
   return md
+    .replace(/</g, "&lt;")                                  // escape literal angle brackets first
+    .replace(/>/g, "&gt;")
     .replace(/\*\*(.+?)\*\*/gs, "*$1*")                     // **bold** → *bold*
     .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")                   // # heading → *heading*
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "<$2|$1>"); // [t](u) → <u|t>
@@ -163,9 +177,9 @@ async function handleEvent(
     const answer = res.answer.startsWith("[halted")
       ? `⏱ Stopped early (${res.haltedBy}). A deep council on a local model can take a while — try a simpler ask, or send it again.`
       : res.answer;
-    const formatted = toSlackMrkdwn(answer) || "(no answer produced)";
+    const formatted = truncateForSlack(toSlackMrkdwn(answer) || "(no answer produced)");
     const edited = statusTs !== undefined && (await updateMessage(token, msg.channel, statusTs, formatted));
-    if (!edited) await postMessage(token, msg.channel, answer); // fallback
+    if (!edited) await postMessage(token, msg.channel, truncateForSlack(answer)); // fallback
   } catch (e) {
     const errText = e instanceof Error ? e.message : String(e);
     if (statusTs !== undefined) await updateMessage(token, msg.channel, statusTs, `⚠️ Error: ${errText}`);
@@ -190,26 +204,41 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   // Reconnect loop: Slack sends a "disconnect" frame before maintenance.
+  // Exponential backoff on failure (1s → 30s); reset to 1s after a healthy socket.
+  const BACKOFF_MIN_MS = 1000;
+  const BACKOFF_MAX_MS = 30_000;
+  const HEALTHY_MS = 60_000; // a socket open this long counts as healthy → reset backoff
+  let backoffMs = BACKOFF_MIN_MS;
   while (true) {
-    const url = await openSocketModeUrl(appToken);
-    await new Promise<void>((resolve) => {
-      const ws = new WebSocket(url);
-      ws.addEventListener("message", (ev) => {
-        let frame: any;
-        try { frame = JSON.parse(typeof ev.data === "string" ? ev.data : ""); } catch { return; }
-        if (frame.type === "disconnect") { ws.close(); return; }
-        if (frame.type !== "events_api" || !frame.envelope_id) return;
-        ack(ws, frame.envelope_id);
-        const event = frame.payload?.event;
-        const msg = extractSlackMessage(event);
-        if (!msg) return;
-        if (!isSlackAuthorized(msg.userId, allowed)) { console.error(`ignored unauthorized user ${msg.userId}`); return; }
-        void handleEvent(runtime, token, msg); // each message independent — one error can't kill the socket
+    const connectedAt = Date.now();
+    try {
+      const url = await openSocketModeUrl(appToken);
+      await new Promise<void>((resolve) => {
+        const ws = new WebSocket(url);
+        ws.addEventListener("message", (ev) => {
+          let frame: any;
+          try { frame = JSON.parse(typeof ev.data === "string" ? ev.data : ""); } catch { return; }
+          if (frame.type === "disconnect") { ws.close(); return; }
+          if (frame.type !== "events_api" || !frame.envelope_id) return;
+          ack(ws, frame.envelope_id);
+          const event = frame.payload?.event;
+          const msg = extractSlackMessage(event);
+          if (!msg) return;
+          if (!isSlackAuthorized(msg.userId, allowed)) { console.error(`ignored unauthorized user ${msg.userId}`); return; }
+          // each message independent — one error can't kill the socket; guard the rejection
+          void handleEvent(runtime, token, msg).catch((e) => console.error("Slack handleEvent error:", e));
+        });
+        ws.addEventListener("close", () => resolve());
+        ws.addEventListener("error", () => { try { ws.close(); } catch { /* noop */ } resolve(); });
       });
-      ws.addEventListener("close", () => resolve());
-      ws.addEventListener("error", () => { try { ws.close(); } catch { /* noop */ } resolve(); });
-    });
-    console.error("Slack socket closed — reconnecting…");
+    } catch (e) {
+      console.error("Slack socket error:", e);
+    }
+    // Reset backoff if the connection stayed open a healthy while; else escalate.
+    if (Date.now() - connectedAt >= HEALTHY_MS) backoffMs = BACKOFF_MIN_MS;
+    console.error(`Slack socket closed — reconnecting in ${backoffMs}ms…`);
+    await new Promise<void>((r) => setTimeout(r, backoffMs));
+    backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
   }
 }
 

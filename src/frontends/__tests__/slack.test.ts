@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { parseAllowedSlackIds, isSlackAuthorized, extractSlackMessage, toSlackMrkdwn } from "../slack.js";
+import {
+  parseAllowedSlackIds,
+  isSlackAuthorized,
+  extractSlackMessage,
+  toSlackMrkdwn,
+  truncateForSlack,
+  SLACK_TEXT_LIMIT,
+} from "../slack.js";
 
 describe("parseAllowedSlackIds", () => {
   it("parses a comma-separated list of string ids", () => {
@@ -68,5 +75,20 @@ describe("toSlackMrkdwn", () => {
   });
   it("leaves plain text untouched", () => {
     expect(toSlackMrkdwn("just words")).toBe("just words");
+  });
+  it("escapes literal angle brackets", () => {
+    expect(toSlackMrkdwn("5 < 10 > 3")).toBe("5 &lt; 10 &gt; 3");
+  });
+});
+
+describe("truncateForSlack", () => {
+  it("leaves a short string unchanged", () => {
+    expect(truncateForSlack("hello")).toBe("hello");
+  });
+  it("truncates an over-limit string and appends the marker", () => {
+    const long = "x".repeat(SLACK_TEXT_LIMIT + 100);
+    const out = truncateForSlack(long);
+    expect(out.length).toBeLessThanOrEqual(SLACK_TEXT_LIMIT);
+    expect(out.endsWith("\n…[truncated]")).toBe(true);
   });
 });
