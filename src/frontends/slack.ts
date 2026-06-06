@@ -116,3 +116,101 @@ export async function openSocketModeUrl(appToken: string): Promise<string> {
   if (!data.ok || !data.url) throw new Error(`apps.connections.open failed: ${data.error ?? "unknown"}`);
   return data.url;
 }
+
+// ─── Main ───────────────────────────────────────────────────────────────────
+
+// Node ≥22 exposes WebSocket as a global; @types/node 22.x does not yet include
+// the declaration, so we declare it minimally here. Requires Node ≥22 at runtime.
+declare const WebSocket: {
+  new (url: string): {
+    send(data: string): void;
+    close(): void;
+    addEventListener(type: "message", listener: (ev: { data: unknown }) => void): void;
+    addEventListener(type: "close", listener: () => void): void;
+    addEventListener(type: "error", listener: () => void): void;
+  };
+};
+
+/** Acknowledge a Socket Mode envelope so Slack stops re-delivering it. */
+function ack(ws: InstanceType<typeof WebSocket>, envelopeId: string): void {
+  ws.send(JSON.stringify({ envelope_id: envelopeId }));
+}
+
+async function handleEvent(
+  runtime: Awaited<ReturnType<typeof buildAgentFromEnv>>,
+  token: string,
+  msg: { channel: string; userId: string; text: string },
+): Promise<void> {
+  const statusTs = await postMessage(token, msg.channel, "🤔 working…");
+  const steps: string[] = [];
+  let lastEdit = 0;
+  const flush = () => {
+    const now = Date.now();
+    if (statusTs === undefined || now - lastEdit < 1200) return; // throttle Slack edits
+    lastEdit = now;
+    void updateMessage(token, msg.channel, statusTs, `🤔 working…\n${steps.join("\n")}`);
+  };
+  const onEvent = (e: AgentEvent) => {
+    if (e.type === "step") steps.push(`⚙️ step ${e.iteration}`);
+    else if (e.type === "assistant" && e.toolCalls.length)
+      for (const c of e.toolCalls) steps.push(`${toolEmoji(c.name)} ${c.name}…`);
+    else if (e.type === "tool-result") steps.push(`   ✅ ${e.name}`);
+    else return;
+    flush();
+  };
+  try {
+    const res = await runtime.orchestrator({ maxIterations: 10, timeoutMs: 180_000, onEvent }).run(msg.text);
+    const answer = res.answer.startsWith("[halted")
+      ? `⏱ Stopped early (${res.haltedBy}). A deep council on a local model can take a while — try a simpler ask, or send it again.`
+      : res.answer;
+    const formatted = toSlackMrkdwn(answer) || "(no answer produced)";
+    const edited = statusTs !== undefined && (await updateMessage(token, msg.channel, statusTs, formatted));
+    if (!edited) await postMessage(token, msg.channel, answer); // fallback
+  } catch (e) {
+    const errText = e instanceof Error ? e.message : String(e);
+    if (statusTs !== undefined) await updateMessage(token, msg.channel, statusTs, `⚠️ Error: ${errText}`);
+    else await postMessage(token, msg.channel, `⚠️ Error: ${errText}`).catch(() => {});
+  }
+}
+
+async function main(): Promise<void> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  const appToken = process.env.SLACK_APP_TOKEN;
+  if (!token) { console.error("SLACK_BOT_TOKEN is required"); process.exit(1); }
+  if (!appToken) { console.error("SLACK_APP_TOKEN is required"); process.exit(1); }
+
+  const allowed = parseAllowedSlackIds(process.env.SLACK_ALLOWED_USER_IDS);
+  if (allowed.size === 0) { console.error("Refusing to start without SLACK_ALLOWED_USER_IDS"); process.exit(1); }
+
+  const runtime = await buildAgentFromEnv(); // singleton — reused for every message
+  console.error(`tachi-agent Slack bot ready · ${runtime.toolCount} downstream tools`);
+
+  const shutdown = async () => { try { await runtime.close(); } finally { process.exit(0); } };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  // Reconnect loop: Slack sends a "disconnect" frame before maintenance.
+  while (true) {
+    const url = await openSocketModeUrl(appToken);
+    await new Promise<void>((resolve) => {
+      const ws = new WebSocket(url);
+      ws.addEventListener("message", (ev) => {
+        let frame: any;
+        try { frame = JSON.parse(typeof ev.data === "string" ? ev.data : ""); } catch { return; }
+        if (frame.type === "disconnect") { ws.close(); return; }
+        if (frame.type !== "events_api" || !frame.envelope_id) return;
+        ack(ws, frame.envelope_id);
+        const event = frame.payload?.event;
+        const msg = extractSlackMessage(event);
+        if (!msg) return;
+        if (!isSlackAuthorized(msg.userId, allowed)) { console.error(`ignored unauthorized user ${msg.userId}`); return; }
+        void handleEvent(runtime, token, msg); // each message independent — one error can't kill the socket
+      });
+      ws.addEventListener("close", () => resolve());
+      ws.addEventListener("error", () => { try { ws.close(); } catch { /* noop */ } resolve(); });
+    });
+    console.error("Slack socket closed — reconnecting…");
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) main().catch((e) => { console.error(e); process.exit(1); });
