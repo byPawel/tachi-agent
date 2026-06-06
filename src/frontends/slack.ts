@@ -71,3 +71,48 @@ export function toolEmoji(name: string): string {
   if (name.includes("reason") || name.includes("think")) return "🤔";
   return "🔧";
 }
+
+// ─── Slack Web API helpers ──────────────────────────────────────────────────
+
+const SLACK_API = "https://slack.com/api";
+
+/** Post a message; returns its `ts` (used for later edits) or undefined. */
+export async function postMessage(
+  token: string, channel: string, text: string,
+): Promise<string | undefined> {
+  const res = await fetch(`${SLACK_API}/chat.postMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ channel, text }),
+  });
+  const data = (await res.json()) as { ok: boolean; ts?: string };
+  return data.ok ? data.ts : undefined;
+}
+
+/** Edit a message by `ts`; returns true if Slack accepted it. */
+export async function updateMessage(
+  token: string, channel: string, ts: string, text: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${SLACK_API}/chat.update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ channel, ts, text }),
+    });
+    const data = (await res.json()) as { ok: boolean };
+    return data.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Open a Socket Mode connection; returns the wss URL to connect to. */
+export async function openSocketModeUrl(appToken: string): Promise<string> {
+  const res = await fetch(`${SLACK_API}/apps.connections.open`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
+  });
+  const data = (await res.json()) as { ok: boolean; url?: string; error?: string };
+  if (!data.ok || !data.url) throw new Error(`apps.connections.open failed: ${data.error ?? "unknown"}`);
+  return data.url;
+}
