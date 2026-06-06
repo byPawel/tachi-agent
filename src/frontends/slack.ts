@@ -27,3 +27,23 @@ export function parseAllowedSlackIds(env: string | undefined): Set<string> {
 export function isSlackAuthorized(userId: string | undefined, allowed: Set<string>): boolean {
   return allowed.size > 0 && userId !== undefined && allowed.has(userId);
 }
+
+/**
+ * Extract { channel, userId, text } from a Slack event (payload.event).
+ * Accepts plain `message` and `app_mention` events from a real user; returns
+ * null for bot echoes (bot_id), message subtypes (edits/joins), non-text, or
+ * any other event type. Leading `<@BOT>` mentions are stripped.
+ */
+export function extractSlackMessage(
+  event: any,
+): { channel: string; userId: string; text: string } | null {
+  if (!event) return null;
+  if (event.type !== "message" && event.type !== "app_mention") return null;
+  if (event.bot_id || event.subtype) return null; // drop bot echoes + edits/joins
+  const channel: string | undefined = event.channel;
+  const userId: string | undefined = event.user;
+  if (typeof event.text !== "string" || channel === undefined || userId === undefined) return null;
+  const text = event.text.replace(/^\s*<@[^>]+>\s*/, "").trim(); // strip a leading @-mention
+  if (text === "") return null;
+  return { channel, userId, text };
+}
