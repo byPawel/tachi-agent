@@ -2,6 +2,7 @@
 import http from "node:http";
 import type { AgentRuntime } from "../runtime.js";
 import type { AgentEvent } from "../types.js";
+import type { GatewayEvent } from "./types.js";
 import { RunRegistry } from "./registry.js";
 import { parseBearer, resolveTenant } from "./auth.js";
 import { formatSse, SSE_HEADERS } from "./sse.js";
@@ -18,6 +19,8 @@ export interface GatewayOptions {
   heartbeatMs?: number;
   /** Max concurrent running runs per tenant before 429. Default 16. */
   maxConcurrentPerTenant?: number;
+  /** Per-run event ring-buffer cap (Last-Event-ID replay depth). Default TACHI_SESSION_BUFFER_MAX ?? 10000. */
+  sessionBufferMax?: number;
   /** Token config source. Defaults to process.env. */
   env?: { GATEWAY_TOKENS?: string; GATEWAY_TOKEN?: string };
 }
@@ -49,7 +52,7 @@ export function createGatewayServer(
   runtime: Pick<AgentRuntime, "orchestrator">,
   opts: GatewayOptions = {},
 ): http.Server {
-  const registry = new RunRegistry();
+  const registry = new RunRegistry({ bufferMax: opts.sessionBufferMax });
   const env = opts.env ?? process.env;
   const heartbeatMs = opts.heartbeatMs ?? 15000;
   const maxConcurrent = opts.maxConcurrentPerTenant ?? 16;
@@ -104,21 +107,58 @@ export function createGatewayServer(
         const record = registry.get(parts[1]);
         if (!record || record.tenant !== tenant.tenant) return json(res, 404, { error: "not found" });
 
-        // GET /runs/:id/events  → SSE
+        // GET /runs/:id/events  → SSE (with Last-Event-ID resume + gap detection)
         if (req.method === "GET" && parts.length === 3 && parts[2] === "events") {
-          res.writeHead(200, SSE_HEADERS);
-          for (const { seq, event } of record.events) res.write(formatSse(event, seq)); // replay buffered
-          if (record.status !== "running") return void res.end();
+          // Resume point: `Last-Event-ID` header (SSE-native) or `?lastEventId=` fallback.
+          const rawLast = (req.headers["last-event-id"] as string | undefined) ?? url.searchParams.get("lastEventId") ?? "";
+          const lastEventId = Number.isFinite(Number(rawLast)) && rawLast !== "" ? Math.max(0, Math.floor(Number(rawLast))) : 0;
 
-          const heartbeat = setInterval(() => res.write(formatSse({ type: "heartbeat" })), heartbeatMs);
-          const cleanup = () => { clearInterval(heartbeat); unsub(); };
-          const unsub = registry.subscribe(record.id, (e, seq) => {
+          // Gap: the next event the client needs (lastEventId+1) was already evicted
+          // from the ring (minSeq>0 means some event is buffered). 409 so the client
+          // can fall back to a fresh stream / poll instead of silently skipping events.
+          const minSeq = registry.minSeq(record.id);
+          if (lastEventId > 0 && minSeq > 0 && minSeq > lastEventId + 1) {
+            return json(res, 409, { error: "event history gap", min_available: minSeq });
+          }
+
+          res.writeHead(200, SSE_HEADERS);
+
+          // Subscribe-then-replay (no await between) so an append during replay can't
+          // be dropped or duplicated: live events arriving before we go live are queued,
+          // then flushed by seq once, deduped against what replay already wrote.
+          let live = false;
+          let lastWritten = lastEventId;
+          const pending: Array<{ event: GatewayEvent; seq: number }> = [];
+          const write = (e: GatewayEvent, seq: number): boolean => {
             try {
               res.write(formatSse(e, seq));
-              if (e.type === "final" || e.type === "error") { cleanup(); res.end(); }
-            } catch { cleanup(); res.end(); } // socket gone → always release the interval/sub
+              lastWritten = seq;
+              if (e.type === "final" || e.type === "error") { cleanup(); res.end(); return false; }
+              return true;
+            } catch { cleanup(); res.end(); return false; }
+          };
+
+          const heartbeat = setInterval(() => {
+            try { res.write(formatSse({ type: "heartbeat" })); } catch { cleanup(); res.end(); }
+          }, heartbeatMs);
+          const cleanup = () => { clearInterval(heartbeat); unsub(); };
+          const unsub = registry.subscribe(record.id, (e, seq) => {
+            if (!live) { pending.push({ event: e, seq }); return; }
+            write(e, seq);
           });
           req.on("close", cleanup);
+
+          // Replay buffered events strictly after the resume point, in seq order.
+          for (const { seq, event } of registry.eventsAfter(record.id, lastEventId)) {
+            if (!write(event, seq)) return; // settled mid-replay → done
+          }
+          // Flush anything that arrived during replay (seq beyond what we just wrote), then go live.
+          for (const p of pending) if (p.seq > lastWritten) { if (!write(p.event, p.seq)) return; }
+          live = true;
+
+          // A run that already finished (and emitted no live tail) gets its buffered
+          // replay above; close the stream now since no more events will come.
+          if (record.status !== "running") { cleanup(); return void res.end(); }
           return;
         }
 
