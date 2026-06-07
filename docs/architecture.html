@@ -322,9 +322,9 @@ dokoro_session_recall
                 <!-- inner cycle -->
                 <text class="d-text" x="328" y="364" text-anchor="middle" font-size="11" font-weight="700">reason → maybe call tool → observe</text>
               </g>
-              <!-- inner loop-back arrow (the iteration) -->
-              <path class="d-edge-accent d-draw" style="--d-len:240;--d-delay:.8s" d="M236 392 C 220 426, 436 426, 420 392" stroke-width="1.75" marker-end="url(#lArrow)" />
-              <text class="d-accent d-fade" style="--d-delay:.92s" x="328" y="418" text-anchor="middle" font-size="9.5">↻ iterate (next step)</text>
+              <!-- inner loop-back: self-loop on the box edge (next iteration) -->
+              <path class="d-edge-accent d-draw" style="--d-len:96;--d-delay:.8s" d="M168 384 C 136 388, 136 416, 168 420" fill="none" stroke-width="1.75" marker-end="url(#lArrow)" />
+              <text class="d-accent d-fade" style="--d-delay:.92s" x="328" y="402" text-anchor="middle" font-size="9.5">↻ next iteration · until halt</text>
 
               <!-- guard → halt -->
               <path class="d-edge-accent d-draw" style="--d-len:52;--d-delay:1s" d="M328 448 V496" stroke-width="2.5" marker-end="url(#lArrow)" />
