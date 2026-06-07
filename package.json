@@ -11,7 +11,8 @@
     "tachi-agent-daemon": "dist/daemon/index.js",
     "tachi-agent-telegram": "dist/frontends/telegram.js",
     "tachi-agent-slack": "dist/frontends/slack.js",
-    "tachi-agent-repl": "dist/frontends/repl.js"
+    "tachi-agent-repl": "dist/frontends/repl.js",
+    "tachi-agent-swarm": "dist/frontends/swarm.js"
   },
   "exports": { ".": "./dist/index.js" },
   "files": ["dist"],
@@ -26,7 +27,8 @@
     "telegram": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/telegram.js",
     "slack": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/slack.js",
     "gateway": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/gateway.js",
-    "daemon": "tsc -p tsconfig.build.json && node --env-file=.env dist/daemon/index.js"
+    "daemon": "tsc -p tsconfig.build.json && node --env-file=.env dist/daemon/index.js",
+    "swarm": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/swarm.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

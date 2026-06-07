@@ -37,8 +37,9 @@ same hub without modifying it:
 - **Front-ends** (CLI, REPL, Telegram, Slack, Claude Code via an MCP `run_agent`
   tool, the HTTP/SSE Gateway, OpenClaw) just call `orchestrator.run(task)` — or,
   against a running daemon, attach via a `UnifiedClient` with the identical surface.
-- **Swarm** is a future composition of the unit (N agents synthesized via
-  `tachibot_council`), not a change to it.
+- **Swarm** (L3) composes the unit without changing it: N role-specialized agents
+  run in parallel on the same task, then a synthesizer agent merges their answers
+  (it may call `tachibot_council` / `tachibot_jury` to adjudicate). See [Swarm](#swarm).
 
 ## Roadmap
 
@@ -46,7 +47,7 @@ same hub without modifying it:
 - **L1 — adapters** ✅ `OllamaDriver` (Qwen2.5, native `/api/chat`) and `HermesDriver` (OpenAI-compatible), both via a `registerDriver` registry; `McpToolHost` (dokoro + tachibot over stdio, namespaced); `DokoroMemory`; a `cli` front-end.
 - **L2 — front-ends** ✅ CLI, REPL, Telegram, Slack (Socket Mode), Claude Code via a thin `run_agent` MCP server, an HTTP/SSE **Gateway**, and the **OpenClaw bridge**.
 - **L2.5 — daemon** ✅ Long-running daemon (reuses the gateway) with thin-client **attach** and **session handoff** — durable monotonic event sequence, `Last-Event-ID` buffered replay, refcount-aware TTL/GC, and graceful drain. A `UnifiedClient` makes local and daemon execution interchangeable, so every front-end swaps a single constructor with no behavior change.
-- **L3 — swarm** ⏳ **(next)** Fan out N agents (varied roles and drivers, including a Kimi swarm) into a `tachibot_council` synthesis — a `deep-research`-shaped flow. Unblocked by L2.5.
+- **L3 — swarm** ✅ Fan out N role-specialized agents (varied prompts/drivers) in parallel on one task, then synthesize via a dedicated synthesizer agent (which can call `tachibot_council` / `tachibot_jury`). Bounded concurrency, quorum warnings, and per-member isolated dokoro sessions. See [Swarm](#swarm).
 
 ## Develop
 
@@ -74,6 +75,62 @@ node dist/cli.js "verify HEAD against ADR-1..3"
 ```
 
 Ctrl-C stops the run cleanly (`AbortSignal` → halts with `aborted`). Progress streams to **stderr**; the final answer prints to **stdout**.
+
+## Swarm
+
+The **swarm** (L3) fans out **N role-specialized agents on the same task**, runs them in
+parallel, then a **synthesizer** agent merges their answers into one. Each member is the
+same `Orchestrator` unit with a different *role lens* (system prompt) and, optionally, a
+different driver — so you get diverse perspectives, not N identical runs.
+
+```bash
+# default roles: implementer · critic · researcher
+npm run swarm -- "design a rate limiter for the gateway"
+
+# or the built bin directly
+node dist/frontends/swarm.js "design a rate limiter for the gateway"
+```
+
+Configure the roster with `TACHI_SWARM_ROLES` (comma-separated; `name` or `name:driver`;
+empty = the defaults):
+
+```bash
+# custom roles, one running on the Hermes driver
+export TACHI_SWARM_ROLES="implementer,critic:hermes,security,researcher"
+npm run swarm -- "review this auth flow"
+```
+
+How it behaves:
+
+- **Parallel, bounded.** Members run concurrently with a small concurrency cap (default 4),
+  so large rosters don't fan out unbounded. Each member inherits the orchestrator's
+  `maxIterations` / `timeoutMs` / cost tracking.
+- **Failure-tolerant + quorum.** A member that errors or times out is recorded with an empty
+  answer and excluded from synthesis; the swarm still proceeds. If too few members answer (or
+  a `critical` role — e.g. the critic — produces nothing), it surfaces a non-fatal **warning**
+  rather than failing.
+- **Synthesis.** A separate synthesizer agent runs over the members' labeled answers and
+  returns one merged result; if the council tools are present it uses `tachibot_council` /
+  `tachibot_jury` to adjudicate disagreements.
+- **Memory.** Each run gets a unique `traceId`. Members are **independent**: each writes to its
+  own isolated dokoro session (`swarm:<traceId>:<role>`) and never reads peers' or prior runs'
+  memory — preserving distinct perspectives. The final synthesized answer is logged **once**
+  under `swarm:<traceId>` for a clean, race-free trace.
+
+Progress streams to **stderr** (one line per member, any warnings, and the trace id); the
+final synthesized answer prints to **stdout**.
+
+```ts
+import { buildSwarmFromEnv } from "tachi-agent";
+
+const swarm = await buildSwarmFromEnv();
+try {
+  const { answer, members, warnings } = await swarm.run("design a rate limiter");
+  console.log(answer);
+} finally {
+  await swarm.close();
+}
+```
 
 ## Security
 
