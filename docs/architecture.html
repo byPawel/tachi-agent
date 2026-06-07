@@ -435,8 +435,8 @@ dokoro_session_recall
               <text class="d-title" x="242" y="258" text-anchor="middle" font-size="13">[ ReAct loop ]</text>
               <text class="d-mono" x="242" y="280" text-anchor="middle" font-size="10">reason → act → observe</text>
               <!-- self-iterate arrow -->
-              <path class="d-edge-accent d-draw" style="--d-len:150;--d-delay:.6s" d="M296 302 C 296 320, 188 320, 188 302" stroke-width="1.5" marker-end="url(#mArrow)" />
-              <text class="d-accent" x="242" y="344" text-anchor="middle" font-size="9.5">↻ iterate (bounded)</text>
+              <path class="d-edge-accent d-draw" style="--d-len:64;--d-delay:.6s" d="M242 303 A 11 11 0 1 1 231 314" fill="none" stroke-width="1.75" marker-end="url(#mArrow)" />
+              <text class="d-accent" x="242" y="346" text-anchor="middle" font-size="9.5">iterate · bounded</text>
               <text class="d-mono" x="242" y="366" text-anchor="middle" font-size="9">no memory mid-loop</text>
             </g>
             <path class="d-edge-accent d-draw" style="--d-len:50;--d-delay:.5s" d="M242 378 V416" stroke-width="2" marker-end="url(#mArrow)" />
@@ -471,8 +471,8 @@ dokoro_session_recall
               <rect class="d-node-accent" x="600" y="228" width="200" height="150" rx="4" filter="url(#mShadow)" />
               <text class="d-title" x="700" y="258" text-anchor="middle" font-size="13">[ ReAct loop ]</text>
               <text class="d-mono" x="700" y="280" text-anchor="middle" font-size="10">reason → act → observe</text>
-              <path class="d-edge-accent d-draw" style="--d-len:150;--d-delay:1.3s" d="M758 302 C 758 320, 642 320, 642 302" stroke-width="1.5" marker-end="url(#mArrow)" />
-              <text class="d-accent" x="700" y="340" text-anchor="middle" font-size="9.5">↻ iterate (bounded)</text>
+              <path class="d-edge-accent d-draw" style="--d-len:64;--d-delay:1.3s" d="M700 303 A 11 11 0 1 1 689 314" fill="none" stroke-width="1.75" marker-end="url(#mArrow)" />
+              <text class="d-accent" x="700" y="346" text-anchor="middle" font-size="9.5">iterate · bounded</text>
             </g>
             <path class="d-edge-accent d-draw" style="--d-len:38;--d-delay:1.8s" d="M700 378 V416" stroke-width="2" marker-end="url(#mArrow)" />
 
@@ -485,23 +485,21 @@ dokoro_session_recall
 
             <!-- in-loop seam 1: live memory — per-iteration recall refresh INTO the loop (vermilion) -->
             <g class="d-fade" style="--d-delay:1.45s">
-              <rect class="d-node-accent" x="826" y="238" width="124" height="62" rx="3" />
-              <text class="d-accent" x="888" y="260" text-anchor="middle" font-size="10.5" font-weight="700">live memory</text>
-              <text class="d-mono" x="888" y="276" text-anchor="middle" font-size="8">per-iter recall</text>
-              <text class="d-mono" x="888" y="288" text-anchor="middle" font-size="8">rewritten in-place</text>
+              <rect class="d-node-accent" x="822" y="236" width="130" height="64" rx="3" />
+              <text class="d-accent" x="887" y="258" text-anchor="middle" font-size="10.5" font-weight="700">live memory</text>
+              <text class="d-mono" x="887" y="274" text-anchor="middle" font-size="8">↻ per-iteration recall</text>
+              <text class="d-mono" x="887" y="288" text-anchor="middle" font-size="8">rewritten in-place</text>
             </g>
-            <path class="d-edge-accent d-draw" style="--d-len:30;--d-delay:1.55s" d="M826 269 H804" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#mArrow)" />
-            <text class="d-accent d-fade" style="--d-delay:1.6s" x="813" y="259" text-anchor="middle" font-size="8">refresh</text>
+            <path class="d-edge-accent d-draw" style="--d-len:22;--d-delay:1.55s" d="M822 268 H801" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#mArrow)" />
 
             <!-- in-loop seam 2: note — per-step write OUT to the blackboard (gold) -->
             <g class="d-fade" style="--d-delay:1.55s">
-              <rect class="d-node-gold" x="826" y="306" width="124" height="62" rx="3" />
-              <text class="d-gold" x="888" y="328" text-anchor="middle" font-size="10.5" font-weight="700">note</text>
-              <text class="d-mono" x="888" y="344" text-anchor="middle" font-size="7.5">shared_note_append</text>
-              <text class="d-mono" x="888" y="356" text-anchor="middle" font-size="7.5">append-only blackboard</text>
+              <rect class="d-node-gold" x="822" y="306" width="130" height="64" rx="3" />
+              <text class="d-gold" x="887" y="328" text-anchor="middle" font-size="10.5" font-weight="700">note</text>
+              <text class="d-mono" x="887" y="344" text-anchor="middle" font-size="8">↳ each step</text>
+              <text class="d-mono" x="887" y="358" text-anchor="middle" font-size="7.5">shared_note_append</text>
             </g>
-            <path class="d-edge-gold d-draw" style="--d-len:30;--d-delay:1.65s" d="M804 337 H824" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#mArrowGold)" />
-            <text class="d-gold d-fade" style="--d-delay:1.7s" x="813" y="327" text-anchor="middle" font-size="8">each step</text>
+            <path class="d-edge-gold d-draw" style="--d-len:22;--d-delay:1.65s" d="M801 338 H822" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#mArrowGold)" />
           </svg>
           <p class="diagram-caption">
             <span>bookend (default): recall → loop → log</span>
