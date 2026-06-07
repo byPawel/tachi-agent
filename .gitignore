@@ -12,3 +12,6 @@ dokoro/
 
 # superpowers planning docs — local working files, not tracked
 docs/superpowers/plans/
+
+# planner accumulator cache (written into cwd by the planner tools)
+.plan-cache/

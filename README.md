@@ -2,58 +2,51 @@
 
 A **local-first orchestration agent** — a small, pluggable ReAct hub that fuses
 **dokoro** (persistent memory) with **tachibot** (multi-model council) over MCP.
-Its default brain runs **100% local** (Qwen2.5 via Ollama), so judgment-grade
-multi-model reasoning works offline at zero token cost.
+Its default brain runs **100% local** (Qwen2.5 via Ollama), so multi-model
+reasoning runs entirely offline with no external API costs.
 
-> Design thesis: *gateways route calls; tachibot routes thinking; tachi-agent is
-> where memory (dokoro) and orchestration (tachibot) finally fuse.* The agent loop
-> lives in the **client**, never inside an MCP server (nesting a loop in a server
-> is a 2026 anti-pattern).
+The agent loop lives in the **client**, never inside an MCP server — keeping the
+hub small, embeddable, and free of nested-loop coupling.
 
 ## Architecture
 
-```
-   OpenClaw · Slack · Claude Code (MCP) · CLI        ← front-ends: call orchestrator.run(task)
-                     │
-                     ▼
-   ┌──────────── Orchestrator (the hub) ────────────┐
-   │  dokoro.recall → ReAct loop → dokoro.log         │
-   │  HALT @ maxIterations + wall-clock timeout       │
-   │  depends on TWO injected seams ↓↓                │
-   └──────┬──────────────────────────────┬───────────┘
-          │ Driver (the brain)            │ ToolHost (the tools)
-          ▼                                ▼
-   default: Qwen2.5 / Ollama        merged MCP tools, namespaced:
-   (OpenClaw/cloud can swap in)      dokoro_*  +  tachibot_*
+```mermaid
+flowchart TD
+    FE["Front-ends — CLI · REPL · Telegram · Slack · Claude Code (MCP) · Gateway · OpenClaw"]
+    FE -->|"orchestrator.run(task)"| ORCH["Orchestrator (the hub)<br/>dokoro.recall → ReAct loop → dokoro.log<br/>HALT @ maxIterations + wall-clock timeout"]
+    ORCH -->|"Driver (brain)"| BRAIN["default: Qwen2.5 / Ollama<br/>swap in: Hermes · cloud · OpenClaw · Kimi swarm"]
+    ORCH -->|"ToolHost (tools)"| TOOLS["merged MCP tools, namespaced<br/>dokoro_* + tachibot_*"]
+    ORCH -->|"Memory"| MEM["dokoro — session recall / log"]
 ```
 
-### The seams (this is the whole API — see `src/types.ts`)
+### The seams (the complete API — see `src/types.ts`)
 
 | Seam | Swap it to… | Default |
 |---|---|---|
-| **`Driver`** | change the brain (OpenClaw's model, a cloud model, Kimi swarm) | local **Qwen2.5/Ollama** |
-| **`ToolHost`** | add/remove MCP servers & tools (config, not code) | **dokoro** + **tachibot** merged, namespaced `${server}_${tool}` |
-| **`Memory`** | swap or disable persistent context | **dokoro** session recall/log |
+| **`Driver`** | change the brain via `registerDriver` — Hermes (OpenAI-compatible), a cloud model, OpenClaw, a Kimi swarm | local **Qwen2.5 / Ollama** |
+| **`ToolHost`** | add or remove MCP servers and tools (config, not code) | **dokoro** + **tachibot** merged, namespaced `${server}_${tool}` |
+| **`Memory`** | swap or disable persistent context | **dokoro** session recall / log |
 
-Because the core depends only on these interfaces, **every integration composes
-the same hub without touching it**:
+Because the core depends only on these interfaces, every integration composes the
+same hub without modifying it:
 
 - **Tools auto-appear** from whatever MCP servers are connected — `tachibot_jury`,
   `tachibot_council`, `tachibot_grok_search`, `tachibot_perplexity_ask`,
-  `tachibot_nextThought` (thinking), `tachibot_execute_prompt_technique` (prompt
-  workflows), `tachibot_workflow` (YAML workflows), `dokoro_session_recall`, … —
-  all **config, not code**.
-- **Front-ends** (CLI, Slack, Claude Code via an MCP `run_agent` tool, OpenClaw)
-  just call `orchestrator.run(task)`.
-- **Swarm** is a future *composition* of the unit (N agents → synthesize via
+  `tachibot_nextThought`, `tachibot_execute_prompt_technique`, `tachibot_workflow`,
+  `dokoro_session_recall`, and so on — all config, not code.
+- **Front-ends** (CLI, REPL, Telegram, Slack, Claude Code via an MCP `run_agent`
+  tool, the HTTP/SSE Gateway, OpenClaw) just call `orchestrator.run(task)` — or,
+  against a running daemon, attach via a `UnifiedClient` with the identical surface.
+- **Swarm** is a future composition of the unit (N agents synthesized via
   `tachibot_council`), not a change to it.
 
-## Roadmap (build the unit, then multiply)
+## Roadmap
 
-- **L0 — core** ✅ `Orchestrator` + seams + tests (this commit). Brain/tools/memory all faked in tests; no network needed.
-- **L1 — adapters** ⏳ `OllamaDriver` (Qwen2.5, native `/api/chat`), `McpToolHost` (dokoro + tachibot over stdio, namespaced), `DokoroMemory`, a `cli` front-end.
-- **L2 — front-ends** ⏳ Slack bot; Claude Code via a thin `run_agent` MCP server; OpenClaw driver.
-- **L3 — swarm** ⏳ separate package: fan out N agents (varied roles/drivers, incl. Kimi swarm) → `tachibot_council` synthesis (a `deep-research`-shaped flow).
+- **L0 — core** ✅ `Orchestrator` + seams + tests. Brain, tools, and memory are all mocked in tests; no network needed.
+- **L1 — adapters** ✅ `OllamaDriver` (Qwen2.5, native `/api/chat`) and `HermesDriver` (OpenAI-compatible), both via a `registerDriver` registry; `McpToolHost` (dokoro + tachibot over stdio, namespaced); `DokoroMemory`; a `cli` front-end.
+- **L2 — front-ends** ✅ CLI, REPL, Telegram, Slack (Socket Mode), Claude Code via a thin `run_agent` MCP server, an HTTP/SSE **Gateway**, and the **OpenClaw bridge**.
+- **L2.5 — daemon** ✅ Long-running daemon (reuses the gateway) with thin-client **attach** and **session handoff** — durable monotonic event sequence, `Last-Event-ID` buffered replay, refcount-aware TTL/GC, and graceful drain. A `UnifiedClient` makes local and daemon execution interchangeable, so every front-end swaps a single constructor with no behavior change.
+- **L3 — swarm** ⏳ **(next)** Fan out N agents (varied roles and drivers, including a Kimi swarm) into a `tachibot_council` synthesis — a `deep-research`-shaped flow. Unblocked by L2.5.
 
 ## Develop
 
@@ -68,7 +61,7 @@ npm run build  # tsc → dist/
 ```bash
 # 1. local brain
 ollama serve &           # start Ollama
-ollama pull qwen2.5      # tool-calling model (Qwen2.5 > Hermes for tool calls)
+ollama pull qwen2.5      # recommended local tool-calling model
 
 # 2. point at your MCP servers (council + memory)
 export TACHIBOT_CMD="npx -y tachibot-mcp"
@@ -80,26 +73,26 @@ node dist/cli.js "verify HEAD against ADR-1..3"
 # dev mode:  npm run dev -- "your task"
 ```
 
-Ctrl-C stops the run cleanly (AbortSignal → halts `aborted`). Progress streams to **stderr**; the final answer prints to **stdout**.
+Ctrl-C stops the run cleanly (`AbortSignal` → halts with `aborted`). Progress streams to **stderr**; the final answer prints to **stdout**.
 
 ## Security
 
-- **Local-first is the security posture.** Default brain is local Qwen2.5 (Ollama bound to `127.0.0.1`, no SSRF); tools run over local stdio. tachi-agent holds **no cloud keys** — the council's provider keys live in `tachibot-mcp`, so the agent's own secret surface is ~zero.
-- **Trust boundary:** MCP server commands come ONLY from config/env (`*_CMD`), never from a user or model message — no command injection. The `McpToolHost({ allow })` allowlist keeps write/dangerous tools out unless explicitly granted.
-- **Untrusted front-ends (Telegram/Slack/HTTP):** authenticate at the edge (Telegram allowed user-ids, Slack signing secret, localhost-only MCP). The task string is *data*; the agent can only call whitelisted tools — never arbitrary shell.
-- **Prompt injection:** search/tool results fed back may carry injection. Mitigate with a bounded tool allowlist (no shell/file-write by default), treating tool output as untrusted data, and approval gates for any write tool (roadmap).
+- **Local-first is the security posture.** The default brain is local Qwen2.5 (Ollama bound to `127.0.0.1`, no SSRF) and tools run over local stdio. tachi-agent holds **no cloud keys** — the council's provider keys live in `tachibot-mcp`, so the agent's own secret surface is near zero.
+- **Trust boundary.** MCP server commands come only from config/env (`*_CMD`), never from a user or model message — no command injection. The `McpToolHost({ allow })` allowlist keeps write or dangerous tools out unless explicitly granted.
+- **Untrusted front-ends (Telegram / Slack / HTTP).** Authenticate at the edge (Telegram allowed user-ids, Slack app tokens, localhost-only MCP). The task string is *data*; the agent can only call allowlisted tools, never arbitrary shell.
+- **Prompt injection.** Search and tool results fed back may carry injection. Mitigate with a bounded tool allowlist (no shell or file-write by default), by treating tool output as untrusted data, and with approval gates for any write tool (roadmap).
 
 ## Multi-tenant
 
-- **One `Orchestrator` + one `AbortController` + one dokoro session/workspace id per tenant.** The orchestrator is stateless between runs, so N tenants = N independent `run()` calls with no shared state.
-- Don't share memory across tenants — scope dokoro recall/log by tenant session id. Use per-tenant tool allowlists and per-tenant `maxIterations` / `timeoutMs` as rate/cost limits.
+- **One `Orchestrator`, one `AbortController`, and one dokoro session/workspace id per tenant.** The orchestrator is stateless between runs, so N tenants = N independent `run()` calls with no shared state.
+- Don't share memory across tenants — scope dokoro recall/log by tenant session id. Use per-tenant tool allowlists and per-tenant `maxIterations` / `timeoutMs` as rate and cost limits.
 
 ## Deploy
 
 - **Default: local CLI** — most private, zero infra, fully on-device.
-- **Gateway (the "orchestration gateway" positioning):** wrap `orchestrator.run` behind a thin service — either a `run_agent` MCP server (Claude Code connects in) or an HTTP/WS gateway (Telegram/Slack webhooks). Put **auth + rate-limit + per-tenant allowlist** in front. **Keep the model local even when the gateway is hosted** — host only the thin orchestrator, not the brain, so the privacy story holds. Any cloud secrets stay in `tachibot-mcp`, not the gateway.
+- **Gateway.** Wrap `orchestrator.run` behind a thin service — either a `run_agent` MCP server (Claude Code connects in) or the HTTP/SSE gateway (Telegram/Slack webhooks). Put **auth, rate-limiting, and a per-tenant allowlist** in front. Keep the model local even when the gateway is hosted — host only the thin orchestrator, not the brain, so the privacy story holds. Any cloud secrets stay in `tachibot-mcp`.
 
-## Gateway API (deploy as a service)
+## Gateway API
 
 ```bash
 export GATEWAY_TOKEN="change-me" GATEWAY_PORT=8787
@@ -111,54 +104,48 @@ npm run build && node dist/frontends/gateway.js
 |---|---|
 | `POST /runs` `{task, maxIterations?}` | start a run → `202 {run_id}` |
 | `GET /runs/:id` | run state + final result |
-| `GET /runs/:id/events` | **SSE** stream: `step`/`assistant`/`tool-result`/`final`/`error`/`heartbeat` |
+| `GET /runs/:id/events` | **SSE** stream: `step` / `assistant` / `tool-result` / `final` / `error` / `heartbeat` |
 | `DELETE /runs/:id` | cancel (cooperative abort) |
 
-All requests require `Authorization: Bearer <token>`; run IDs are namespaced per tenant.
-Async-job + SSE shape (resilient to disconnects, resumable replay via `id:`). Keep the
-model local even when the gateway is hosted; put rate-limit/quotas at this boundary.
+All requests require `Authorization: Bearer <token>`; run ids are namespaced per tenant. The async-job + SSE shape is resilient to disconnects, with resumable replay via `Last-Event-ID`. Keep the model local even when the gateway is hosted, and put rate-limits and quotas at this boundary.
 
 ### OpenClaw bridge
 
-Let [OpenClaw](https://github.com/openclaw) delegate tasks to tachi-agent over the
-gateway HTTP/SSE API. Run `npm run gateway` (with `GATEWAY_TOKEN`), then from OpenClaw:
+Let [OpenClaw](https://github.com/openclaw) delegate tasks to tachi-agent over the gateway HTTP/SSE API. Run `npm run gateway` (with `GATEWAY_TOKEN`), then from OpenClaw:
 
 ```ts
 import { GatewayClient } from "tachi-agent";
-const tachi = new GatewayClient({ baseUrl: "http://127.0.0.1:8787", token: process.env.TACHI_GATEWAY_TOKEN! });
+
+const tachi = new GatewayClient({
+  baseUrl: "http://127.0.0.1:8787",
+  token: process.env.TACHI_GATEWAY_TOKEN!,
+});
 const answer = await tachi.runAndWait("research X");
 ```
 
-See [docs/openclaw-bridge.md](docs/openclaw-bridge.md) for the plugin/skill wiring.
+See [docs/openclaw-bridge.md](docs/openclaw-bridge.md) for plugin/skill wiring.
 
 ## Extending (without forking)
 
 ```ts
 import { createOrchestrator, registerDriver } from "tachi-agent";
 
-// 1. plug in any brain (OpenClaw, a cloud model, a Kimi-swarm driver)
-registerDriver("openclaw", () => new OpenClawDriver());
+// 1. register any brain (Hermes, a cloud model, OpenClaw, a Kimi-swarm driver)
+registerDriver("hermes", () => new HermesDriver());
 
 // 2. build the hub from a registered name (or a raw Driver instance)
-const agent = createOrchestrator({ driver: "openclaw", host, memory });
-
-// 3. run — and stop it any time
 const controller = new AbortController();
 const result = await createOrchestrator({
-  driver: "openclaw", host, memory,
+  driver: "hermes",
+  host,
+  memory,
   options: { maxIterations: 12, timeoutMs: 90_000, signal: controller.signal },
 }).run("verify HEAD against ADR-1..3");
-// elsewhere: controller.abort()  → run halts with haltedBy: "aborted"
+// elsewhere: controller.abort() → run halts with haltedBy: "aborted"
 ```
 
-Implement `Driver` / `ToolHost` / `Memory` (see `src/types.ts`) to extend; no core changes.
+Implement `Driver` / `ToolHost` / `Memory` (see `src/types.ts`) to extend; no core changes required.
 
-## Why MIT (not AGPL)
+## License
 
-tachi-agent is the **pluggable hub meant to be embedded** by other agents — adoption
-beats protection here, and AGPL would scare off the embedders. The moat lives
-*elsewhere* (dokoro context + tachibot's cross-vendor council it calls), both of
-which it reaches over the MCP wire, so an MIT client and an AGPL `tachibot-mcp`
-server coexist cleanly.
-
-License: MIT
+MIT — see [LICENSE](LICENSE). tachi-agent is a pluggable client meant to be embedded by other agents; the council's provider keys and the persistent-memory backend live behind the MCP wire (`tachibot-mcp`, `dokoro`), so an MIT client and the server it calls compose cleanly.
