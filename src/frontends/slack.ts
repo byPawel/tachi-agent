@@ -7,7 +7,7 @@
  * Streams progress by editing the "working…" message, then edits it into the
  * final answer (Slack mrkdwn). Security: allowlist-only, fail-closed.
  */
-import { buildAgentFromEnv } from "../runtime.js";
+import { createUnifiedClient, type UnifiedClient } from "../client/unified.js";
 import type { AgentEvent } from "../types.js";
 
 // ─── Pure helpers (exported for unit tests — no I/O, no network) ───────────
@@ -151,7 +151,7 @@ function ack(ws: InstanceType<typeof WebSocket>, envelopeId: string): void {
 }
 
 async function handleEvent(
-  runtime: Awaited<ReturnType<typeof buildAgentFromEnv>>,
+  client: UnifiedClient,
   token: string,
   msg: { channel: string; userId: string; text: string },
 ): Promise<void> {
@@ -173,7 +173,7 @@ async function handleEvent(
     flush();
   };
   try {
-    const res = await runtime.orchestrator({ maxIterations: 10, timeoutMs: 180_000, onEvent }).run(msg.text);
+    const res = await client.run(msg.text, { onEvent, maxIterations: 10, timeoutMs: 180_000 });
     const answer = res.answer.startsWith("[halted")
       ? `⏱ Stopped early (${res.haltedBy}). A deep council on a local model can take a while — try a simpler ask, or send it again.`
       : res.answer;
@@ -196,10 +196,16 @@ async function main(): Promise<void> {
   const allowed = parseAllowedSlackIds(process.env.SLACK_ALLOWED_USER_IDS);
   if (allowed.size === 0) { console.error("Refusing to start without SLACK_ALLOWED_USER_IDS"); process.exit(1); }
 
-  const runtime = await buildAgentFromEnv(); // singleton — reused for every message
-  console.error(`tachi-agent Slack bot ready · ${runtime.toolCount} downstream tools`);
+  // Local-or-daemon: with TACHI_DAEMON_URL set this attaches to the daemon; unset, it
+  // builds the in-process runtime (identical to before). client.run keeps the same surface.
+  const client = await createUnifiedClient(process.env);
+  console.error(
+    process.env.TACHI_DAEMON_URL
+      ? `tachi-agent Slack bot ready · attached to daemon ${process.env.TACHI_DAEMON_URL}`
+      : `tachi-agent Slack bot ready · local runtime`,
+  );
 
-  const shutdown = async () => { try { await runtime.close(); } finally { process.exit(0); } };
+  const shutdown = async () => { try { await client.close(); } finally { process.exit(0); } };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
@@ -226,7 +232,7 @@ async function main(): Promise<void> {
           if (!msg) return;
           if (!isSlackAuthorized(msg.userId, allowed)) { console.error(`ignored unauthorized user ${msg.userId}`); return; }
           // each message independent — one error can't kill the socket; guard the rejection
-          void handleEvent(runtime, token, msg).catch((e) => console.error("Slack handleEvent error:", e));
+          void handleEvent(client, token, msg).catch((e) => console.error("Slack handleEvent error:", e));
         });
         ws.addEventListener("close", () => resolve());
         ws.addEventListener("error", () => { try { ws.close(); } catch { /* noop */ } resolve(); });

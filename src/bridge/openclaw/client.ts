@@ -310,14 +310,14 @@ export class GatewayClient {
 export function remoteClient(baseUrl: string, token: string, fetchImpl?: typeof fetch): UnifiedClient {
   const gw = new GatewayClient({ baseUrl, token, fetchImpl });
   return {
-    async run(text, { onEvent, signal }) {
+    async run(text, { onEvent, signal, maxIterations }) {
       // Capture the final event's haltedBy so the remote RunResult mirrors the local one.
       let haltedBy: RunResult["haltedBy"] = "final-answer";
       const wrapped = (e: AgentEvent): void => {
         if (e.type === "final") haltedBy = e.haltedBy;
         onEvent(e);
       };
-      const { runId } = await gw.startRun(text, { signal });
+      const { runId } = await gw.startRun(text, { maxIterations, signal });
       const outcome = await gw.attach(runId, { lastEventId: 0, onEvent: wrapped, signal });
       if (outcome.status === "error") {
         throw new GatewayHttpError(502, `run failed: ${outcome.error ?? "unknown error"}`);

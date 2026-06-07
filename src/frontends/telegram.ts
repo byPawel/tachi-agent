@@ -7,7 +7,7 @@
  * Streams progress by EDITING the "working…" message as steps/tools fire, then
  * edits it into the Markdown-formatted final answer. Security: allowlist-only.
  */
-import { buildAgentFromEnv } from "../runtime.js";
+import { createUnifiedClient } from "../client/unified.js";
 import type { AgentEvent } from "../types.js";
 
 // ─── Pure helpers (exported for unit tests — no I/O, no network) ───────────
@@ -118,10 +118,17 @@ async function main(): Promise<void> {
   const allowed = parseAllowedIds(process.env.TELEGRAM_ALLOWED_USER_IDS);
   if (allowed.size === 0) { console.error("Refusing to start without TELEGRAM_ALLOWED_USER_IDS"); process.exit(1); }
 
-  const runtime = await buildAgentFromEnv(); // singleton — reused for every message
-  console.error(`tachi-agent Telegram bot ready · ${runtime.toolCount} downstream tools`);
+  // Local-or-daemon: with TACHI_DAEMON_URL set this attaches to the daemon; unset, it
+  // builds the in-process runtime (identical to before). `client.run` returns the same
+  // RunResult and streams the same AgentEvents, so the loop below is unchanged.
+  const client = await createUnifiedClient(process.env);
+  console.error(
+    process.env.TACHI_DAEMON_URL
+      ? `tachi-agent Telegram bot ready · attached to daemon ${process.env.TACHI_DAEMON_URL}`
+      : `tachi-agent Telegram bot ready · local runtime`,
+  );
 
-  const shutdown = async () => { try { await runtime.close(); } finally { process.exit(0); } };
+  const shutdown = async () => { try { await client.close(); } finally { process.exit(0); } };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
@@ -159,7 +166,7 @@ async function main(): Promise<void> {
           flush();
         };
         try {
-          const res = await runtime.orchestrator({ maxIterations: 10, timeoutMs: 180_000, onEvent }).run(msg.text);
+          const res = await client.run(msg.text, { onEvent, maxIterations: 10, timeoutMs: 180_000 });
           const answer = res.answer.startsWith("[halted")
             ? `⏱ Stopped early (${res.haltedBy}). A deep council on a local model can take a while — try a simpler ask, or send it again.`
             : res.answer;

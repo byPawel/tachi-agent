@@ -12,20 +12,30 @@
 import type { AgentEvent, RunResult } from "../types.js";
 import { buildAgentFromEnv as buildAgentFromEnvDefault, type AgentRuntime } from "../runtime.js";
 
+export interface RunOptions {
+  onEvent: (e: AgentEvent) => void;
+  onHalted?: () => void;
+  signal?: AbortSignal;
+  /** Per-run caps. Omitted → the runtime/daemon applies its own defaults. */
+  maxIterations?: number;
+  timeoutMs?: number;
+}
+
 export interface UnifiedClient {
   /** Identical surface for local OR daemon execution. */
-  run(
-    text: string,
-    opts: { onEvent: (e: AgentEvent) => void; onHalted?: () => void; signal?: AbortSignal },
-  ): Promise<RunResult>;
+  run(text: string, opts: RunOptions): Promise<RunResult>;
   close(): Promise<void>;
 }
 
-/** Local adapter: wraps the in-process AgentRuntime. */
+/**
+ * Local adapter: wraps the in-process AgentRuntime. `maxIterations`/`timeoutMs` are
+ * forwarded only when the caller provides them, so a front-end that previously relied
+ * on the Orchestrator's own defaults keeps the exact same behavior.
+ */
 export function localClient(rt: AgentRuntime): UnifiedClient {
   return {
-    run: (text, { onEvent, signal }) =>
-      rt.orchestrator({ maxIterations: 10, timeoutMs: 180_000, onEvent, signal }).run(text),
+    run: (text, { onEvent, signal, maxIterations, timeoutMs }) =>
+      rt.orchestrator({ maxIterations, timeoutMs, onEvent, signal }).run(text),
     close: () => rt.close(),
   };
 }

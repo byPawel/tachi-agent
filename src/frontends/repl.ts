@@ -7,6 +7,7 @@
  */
 import readline from "node:readline";
 import { buildAgentFromEnv } from "../runtime.js";
+import { localClient, createUnifiedClient, type UnifiedClient } from "../client/unified.js";
 import type { AgentEvent } from "../types.js";
 
 const HELP = `commands:
@@ -37,8 +38,26 @@ export function parseCommand(line: string): Command {
 }
 
 async function main(): Promise<void> {
-  const rt = await buildAgentFromEnv();
-  console.error(`tachi-agent REPL · ${rt.driver.name} · ${rt.toolCount} tools · type /help, /exit`);
+  // Local-or-daemon. In LOCAL mode we keep the in-process runtime handle so /tools
+  // and /model still introspect the live host/driver (identical to before). In
+  // DAEMON mode the runtime lives in the daemon, so those commands report that.
+  let client: UnifiedClient;
+  let banner: string;
+  let listTools: () => string;
+  let modelName: () => string;
+  if (process.env.TACHI_DAEMON_URL) {
+    client = await createUnifiedClient(process.env);
+    banner = `tachi-agent REPL · attached to daemon ${process.env.TACHI_DAEMON_URL} · type /help, /exit`;
+    listTools = () => "(unavailable — attached to a daemon)";
+    modelName = () => "(daemon)";
+  } else {
+    const rt = await buildAgentFromEnv();
+    client = localClient(rt);
+    banner = `tachi-agent REPL · ${rt.driver.name} · ${rt.toolCount} tools · type /help, /exit`;
+    listTools = () => rt.host.tools().map((t) => t.name).join("\n") || "(none)";
+    modelName = () => rt.driver.name;
+  }
+  console.error(banner);
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: "tachi › " });
 
@@ -57,13 +76,13 @@ async function main(): Promise<void> {
       case "empty": return rl.prompt();
       case "exit": return rl.close();
       case "help": console.log(HELP); return rl.prompt();
-      case "tools": console.log(rt.host.tools().map((t) => t.name).join("\n") || "(none)"); return rl.prompt();
-      case "model": console.log(rt.driver.name); return rl.prompt();
+      case "tools": console.log(listTools()); return rl.prompt();
+      case "model": console.log(modelName()); return rl.prompt();
       case "run": {
         active = new AbortController();
         rl.pause();
         try {
-          const res = await rt.orchestrator({ signal: active.signal, onEvent }).run(cmd.text);
+          const res = await client.run(cmd.text, { signal: active.signal, onEvent });
           console.log("\n" + res.answer + "\n");
         } catch (e) {
           console.error(`✖ ${e instanceof Error ? e.message : String(e)}`);
@@ -82,7 +101,7 @@ async function main(): Promise<void> {
     else rl.close();
   });
 
-  rl.on("close", async () => { await rt.close(); process.exit(0); });
+  rl.on("close", async () => { await client.close(); process.exit(0); });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
