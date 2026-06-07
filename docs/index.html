@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>tachi-agent — a local-first orchestration agent</title>
+  <meta name="description" content="tachi-agent is a small, pluggable ReAct hub that fuses dokoro (memory) with tachibot (multi-model council) over MCP. Default brain runs 100% local via Qwen2.5 / Ollama." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="wordmark" href="index.html"><span class="kanji">太刀</span> tachi-agent</a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="get-started.html">Get started</a></li>
+        <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="wrap">
+      <div class="hero-grid">
+        <div>
+          <p class="eyebrow hero-anim d1">// local-first <span class="dim">·</span> terminal-native <span class="dim">·</span> built on MCP</p>
+          <div class="hero-wordmark hero-anim d1"><span class="kanji">太刀</span> tachi-agent</div>
+          <h1 class="hero-anim d2">A <span class="accent">local-first</span> orchestration agent.</h1>
+          <p class="hero-sub hero-anim d3">
+            A small, pluggable ReAct hub that fuses <strong>dokoro</strong> (persistent memory)
+            with <strong>tachibot</strong> (multi-model council) over MCP. The default brain runs
+            <strong>100% local</strong> — Qwen2.5 via Ollama — so multi-model reasoning runs
+            entirely <em>offline</em>: no API keys, no cloud cost.
+          </p>
+          <div class="cta-row hero-anim d5">
+            <a class="btn btn-primary" href="get-started.html">Get started →</a>
+            <a class="btn" href="architecture.html">Architecture</a>
+            <a class="btn" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+          </div>
+        </div>
+
+        <div class="hero-anim d4">
+          <div class="terminal" role="img" aria-label="Terminal demo: tachi-agent verifying HEAD against architecture decision records, streaming steps to stderr and the final answer to stdout.">
+            <div class="term-bar">
+              <span class="term-dot red"></span>
+              <span class="term-dot"></span>
+              <span class="term-dot"></span>
+              <span class="term-title">tachi-agent — zsh</span>
+            </div>
+            <div class="term-body" data-terminal aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== WHAT IT IS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">┌─</span> what it is</span>
+          <h2 class="sec-title">The loop lives in the client — never inside an MCP server.</h2>
+        </div>
+        <div class="prose">
+          <p class="lede">
+            The ReAct agent loop runs in the <strong>client</strong>. That keeps the hub small,
+            embeddable, and free of nested-loop coupling — no agent-inside-a-server recursion,
+            no hidden control flow on the wire.
+          </p>
+          <p>
+            Every front-end — CLI, REPL, Telegram, Slack, Claude Code, the Gateway, OpenClaw —
+            just calls <code>orchestrator.run(task)</code>. The core depends on three interfaces
+            and nothing else, so the same hub composes everywhere without being modified.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== THE SEAMS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">//</span> the three seams</span>
+          <h2 class="sec-title">Pluggable without a plugin framework.</h2>
+          <p class="sec-lead">The core depends only on <strong>Driver</strong>, <strong>ToolHost</strong>, and <strong>Memory</strong>. Swap any one without touching the orchestrator.</p>
+        </div>
+
+        <div class="cards">
+          <article class="card" data-num="01">
+            <span class="card-tag">the brain</span>
+            <h3>Driver</h3>
+            <p>
+              Default: <strong>Qwen2.5 / Ollama</strong>, fully local. Swap via
+              <code>registerDriver</code> to Hermes (OpenAI-compatible), a cloud model,
+              OpenClaw, or a Kimi swarm. One interface, any brain.
+            </p>
+          </article>
+
+          <article class="card" data-num="02">
+            <span class="card-tag">the tools</span>
+            <h3>ToolHost</h3>
+            <p>
+              <strong>dokoro</strong> + <strong>tachibot</strong> MCP servers merged and
+              namespaced <code>${server}_${tool}</code>. Add or remove servers via
+              config, not code — tools just auto-appear.
+            </p>
+          </article>
+
+          <article class="card" data-num="03">
+            <span class="card-tag">the memory</span>
+            <h3>Memory</h3>
+            <p>
+              <strong>dokoro</strong> session recall and log wrap each run. Swap the backend
+              or disable persistence entirely — the orchestrator is stateless between runs.
+            </p>
+          </article>
+        </div>
+
+        <p class="cards-tagline">“Pluggable without a plugin framework — the core depends only on these three interfaces.”</p>
+      </div>
+    </section>
+
+    <!-- ===================== ROADMAP ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">04</span>
+          <span class="sec-kicker"><span class="box">┌─</span> roadmap</span>
+          <h2 class="sec-title">From core to swarm.</h2>
+        </div>
+
+        <ol class="timeline">
+          <li class="done">
+            <span class="tl-tag">L0 — core</span><span class="tl-state">✅ shipped</span>
+            <h4>The Orchestrator + seams</h4>
+            <p>The ReAct hub and the <code>Driver</code> / <code>ToolHost</code> / <code>Memory</code> interfaces, fully tested with mocks — no network needed.</p>
+          </li>
+          <li class="done">
+            <span class="tl-tag">L1 — adapters</span><span class="tl-state">✅ shipped</span>
+            <h4>Real brains, tools, and memory</h4>
+            <p><code>OllamaDriver</code> (Qwen2.5) + <code>HermesDriver</code> via a driver registry; <code>McpToolHost</code> (dokoro + tachibot over stdio); <code>DokoroMemory</code>; a CLI.</p>
+          </li>
+          <li class="done">
+            <span class="tl-tag">L2 — front-ends</span><span class="tl-state">✅ shipped</span>
+            <h4>Talk to it from anywhere</h4>
+            <p>CLI, REPL, Telegram, Slack (Socket Mode), Claude Code via a <code>run_agent</code> MCP server, an HTTP/SSE Gateway, and the OpenClaw bridge.</p>
+          </li>
+          <li class="done">
+            <span class="tl-tag">L2.5 — daemon</span><span class="tl-state">✅ shipped</span>
+            <h4>Long-running, attachable</h4>
+            <p>A daemon reusing the gateway with thin-client attach, session handoff, durable event sequence, buffered replay, refcount-aware TTL/GC, and graceful drain.</p>
+          </li>
+          <li class="new">
+            <span class="tl-tag">L3 — swarm</span><span class="tl-state">✅ new</span>
+            <h4>Fan out, then synthesize</h4>
+            <p>N role-specialized agents run one task in parallel, then a synthesizer merges their answers. Bounded concurrency, quorum warnings, per-member memory isolation.</p>
+            <p><a href="swarm.html">Read the Swarm page →</a></p>
+          </li>
+        </ol>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP</div>
+      <div class="footer-links">
+        <a href="architecture.html">Architecture</a>
+        <a href="swarm.html">Swarm</a>
+        <a href="deploy.html">Deploy</a>
+        <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="footer-mark" aria-hidden="true">太刀</div>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

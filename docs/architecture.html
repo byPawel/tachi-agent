@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Architecture — tachi-agent</title>
+  <meta name="description" content="How the tachi-agent hub works: front-ends call orchestrator.run(task); the Orchestrator runs a bounded ReAct loop wrapped by dokoro recall/log, branching to Driver, ToolHost, and Memory." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="wordmark" href="index.html"><span class="kanji">太刀</span> tachi-agent</a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="get-started.html">Get started</a></li>
+        <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow hero-anim d1">// the hub</p>
+      <h1 class="hero-anim d2">Architecture</h1>
+      <p class="hero-sub hero-anim d3">
+        One small orchestrator at the center. Every front-end calls
+        <strong>orchestrator.run(task)</strong>; the hub recalls memory, runs a
+        <strong>bounded ReAct loop</strong>, logs the trace, and halts cleanly.
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== HUB FLOW DIAGRAM ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">01</span>
+          <span class="sec-kicker"><span class="box">┌─</span> the hub flow</span>
+          <h2 class="sec-title">Front-ends in, three seams out.</h2>
+        </div>
+
+        <div class="diagram">
+          <svg viewBox="0 0 980 760" role="img" aria-labelledby="archTitle archDesc" width="980" height="760">
+            <title id="archTitle">tachi-agent hub data flow</title>
+            <desc id="archDesc">Front-ends (CLI, REPL, Telegram, Slack, Claude Code/MCP, Gateway, OpenClaw) call orchestrator.run(task). The Orchestrator runs dokoro.recall, then a bounded ReAct loop, then dokoro.log, halting at maxIterations and a wall-clock timeout. From the loop it branches to the Driver (brain), the ToolHost (namespaced tools), and Memory (dokoro).</desc>
+            <defs>
+              <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 z" fill="#E4572E" />
+              </marker>
+              <marker id="arrowDim" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 z" fill="rgba(236,231,222,.4)" />
+              </marker>
+            </defs>
+
+            <!-- Front-ends -->
+            <rect class="svg-node" x="90" y="30" width="800" height="90" rx="2" />
+            <text class="svg-label" x="490" y="58" text-anchor="middle" font-size="15" font-weight="700">Front-ends</text>
+            <text class="svg-label-mono" x="490" y="82" text-anchor="middle" font-size="12">CLI · REPL · Telegram · Slack · Claude Code (MCP)</text>
+            <text class="svg-label-mono" x="490" y="100" text-anchor="middle" font-size="12">Gateway · OpenClaw</text>
+
+            <!-- edge: front-ends -> orchestrator -->
+            <line class="svg-edge-accent" x1="490" y1="120" x2="490" y2="172" stroke-width="2" marker-end="url(#arrow)" />
+            <text class="svg-label-mono" x="505" y="150" font-size="11" fill="#E4572E">orchestrator.run(task)</text>
+
+            <!-- Orchestrator -->
+            <rect class="svg-node-accent" x="150" y="178" width="680" height="158" rx="2" stroke-width="2" />
+            <text class="svg-label" x="490" y="208" text-anchor="middle" font-size="16" font-weight="700">Orchestrator — the hub</text>
+            <text class="svg-label-mono" x="490" y="238" text-anchor="middle" font-size="12.5">dokoro.recall  →  ReAct loop  →  dokoro.log</text>
+            <line class="svg-edge" x1="220" y1="258" x2="760" y2="258" stroke-width="1" stroke-dasharray="3 4" />
+            <text class="svg-label-mono" x="490" y="286" text-anchor="middle" font-size="11.5">HALT @ maxIterations</text>
+            <text class="svg-label-mono" x="490" y="306" text-anchor="middle" font-size="11.5">+ wall-clock timeout  ·  AbortSignal (Ctrl-C)</text>
+
+            <!-- branch lines -->
+            <line class="svg-edge-accent" x1="280" y1="336" x2="200" y2="430" stroke-width="2" marker-end="url(#arrow)" />
+            <line class="svg-edge-accent" x1="490" y1="336" x2="490" y2="430" stroke-width="2" marker-end="url(#arrow)" />
+            <line class="svg-edge-accent" x1="700" y1="336" x2="780" y2="430" stroke-width="2" marker-end="url(#arrow)" />
+
+            <!-- Driver -->
+            <rect class="svg-node" x="40" y="436" width="280" height="120" rx="2" />
+            <text class="svg-label" x="180" y="466" text-anchor="middle" font-size="14" font-weight="700">Driver — the brain</text>
+            <text class="svg-label-mono" x="180" y="492" text-anchor="middle" font-size="11">default: Qwen2.5 / Ollama</text>
+            <text class="svg-label-mono" x="180" y="510" text-anchor="middle" font-size="11">swap: Hermes · cloud</text>
+            <text class="svg-label-mono" x="180" y="528" text-anchor="middle" font-size="11">OpenClaw · Kimi swarm</text>
+
+            <!-- ToolHost -->
+            <rect class="svg-node" x="350" y="436" width="280" height="120" rx="2" />
+            <text class="svg-label" x="490" y="466" text-anchor="middle" font-size="14" font-weight="700">ToolHost — the tools</text>
+            <text class="svg-label-mono" x="490" y="492" text-anchor="middle" font-size="11">merged MCP tools, namespaced</text>
+            <text class="svg-label" x="490" y="514" text-anchor="middle" font-size="12" fill="#F2C14E">dokoro_*  +  tachibot_*</text>
+            <text class="svg-label-mono" x="490" y="534" text-anchor="middle" font-size="11">config, not code</text>
+
+            <!-- Memory -->
+            <rect class="svg-node" x="660" y="436" width="280" height="120" rx="2" />
+            <text class="svg-label" x="800" y="466" text-anchor="middle" font-size="14" font-weight="700">Memory</text>
+            <text class="svg-label-mono" x="800" y="492" text-anchor="middle" font-size="11">dokoro — session</text>
+            <text class="svg-label-mono" x="800" y="510" text-anchor="middle" font-size="11">recall / log</text>
+            <text class="svg-label-mono" x="800" y="528" text-anchor="middle" font-size="11">swappable · disable-able</text>
+
+            <!-- loop-back: tools feed back into the loop -->
+            <path class="svg-edge" d="M490 556 L490 600 L180 600 L180 556" fill="none" stroke-width="1.5" stroke-dasharray="4 5" marker-end="url(#arrowDim)" />
+            <text class="svg-label-mono" x="490" y="624" text-anchor="middle" font-size="11">tool results → next reasoning step (bounded)</text>
+
+            <!-- caption -->
+            <text class="svg-label-mono" x="490" y="700" text-anchor="middle" font-size="11" opacity="0.7">progress streams to stderr · final answer prints to stdout</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SEAMS IN DEPTH ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">02</span>
+          <span class="sec-kicker"><span class="box">//</span> the three seams, in depth</span>
+          <h2 class="sec-title">Swap any seam. Never touch the core.</h2>
+          <p class="sec-lead">The complete public API is three interfaces — see <code>src/types.ts</code>. Because the orchestrator depends only on these, every integration composes the same hub.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Seam</th><th>Swap it to…</th><th>Default</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Driver</strong><br /><span style="color:var(--muted);font-size:.85em">the brain</span></td>
+                <td>Change the brain via <code>registerDriver</code> — Hermes (OpenAI-compatible), a cloud model, OpenClaw, or a Kimi swarm. Implement one <code>Driver</code> interface.</td>
+                <td>local <strong>Qwen2.5 / Ollama</strong> (native <code>/api/chat</code>)</td>
+              </tr>
+              <tr>
+                <td><strong>ToolHost</strong><br /><span style="color:var(--muted);font-size:.85em">the tools</span></td>
+                <td>Add or remove MCP servers and tools — <em>config, not code</em>. An <code>allow</code> allowlist keeps dangerous tools out unless granted.</td>
+                <td><strong>dokoro</strong> + <strong>tachibot</strong> merged over stdio, namespaced <code>${server}_${tool}</code></td>
+              </tr>
+              <tr>
+                <td><strong>Memory</strong><br /><span style="color:var(--muted);font-size:.85em">the context</span></td>
+                <td>Swap the persistent-context backend or disable it entirely. The orchestrator is stateless between runs.</td>
+                <td><strong>dokoro</strong> session recall / log</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== TOOLS AUTO-APPEAR ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">┌─</span> tools auto-appear</span>
+          <h2 class="sec-title">Whatever you connect, the agent can call.</h2>
+        </div>
+        <div class="prose">
+          <p>
+            Tools come from whatever MCP servers are connected — all config, not code. Connect
+            tachibot and dokoro and these surface automatically, namespaced and ready:
+          </p>
+        </div>
+        <div class="code" data-lang="text">
+          <div class="code-head">
+            <span class="code-label">auto-discovered tools</span>
+            <button class="copy-btn" aria-label="Copy tool list to clipboard">copy</button>
+          </div>
+<pre><span class="c"># namespaced ${server}_${tool} — no registration in code</span>
+tachibot_jury
+tachibot_council
+tachibot_grok_search
+tachibot_perplexity_ask
+tachibot_nextThought
+tachibot_execute_prompt_technique
+tachibot_workflow
+dokoro_session_recall
+<span class="c"># …add a server in config and its tools join the loop</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== REACT LOOP ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">03</span>
+          <span class="sec-kicker"><span class="box">//</span> the ReAct loop</span>
+          <h2 class="sec-title">Recall → reason &amp; act → log. Always bounded.</h2>
+        </div>
+        <div class="split">
+          <div class="prose">
+            <p class="lede">Every run is wrapped by memory and bounded on three axes:</p>
+            <ul>
+              <li><strong>Recall.</strong> The hub asks <code>dokoro</code> for relevant session context before the first reasoning step.</li>
+              <li><strong>Reason &amp; act.</strong> The driver reasons, optionally calls allowlisted tools; results feed the next step.</li>
+              <li><strong>Log.</strong> The trace is written back to <code>dokoro</code> for the next run to recall.</li>
+              <li><strong>Bounded.</strong> A run halts at <code>maxIterations</code>, a wall-clock <code>timeoutMs</code>, or a cooperative <code>AbortSignal</code> — Ctrl-C yields <code>haltedBy: "aborted"</code>.</li>
+            </ul>
+          </div>
+          <div class="code" data-lang="text">
+            <div class="code-head">
+              <span class="code-label">run lifecycle</span>
+              <button class="copy-btn" aria-label="Copy run lifecycle to clipboard">copy</button>
+            </div>
+<pre><span class="k">recall</span>   dokoro.recall(session) → prior context
+  │
+  ▼
+<span class="k">loop</span>     while (iter &lt; maxIterations
+           &amp;&amp; elapsed &lt; timeoutMs
+           &amp;&amp; !signal.aborted):
+           reason → maybe call tool → observe
+  │
+  ▼
+<span class="k">halt</span>     final-answer | maxIterations
+         | timeout | aborted
+  │
+  ▼
+<span class="k">log</span>      dokoro.log(session, trace)</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP</div>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="swarm.html">Swarm</a>
+        <a href="deploy.html">Deploy</a>
+        <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="footer-mark" aria-hidden="true">太刀</div>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

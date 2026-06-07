@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swarm (L3) — tachi-agent</title>
+  <meta name="description" content="L3 Swarm: fan out N role-specialized agents on one task in parallel, then a synthesizer merges their answers. Bounded concurrency, quorum warnings, per-member dokoro memory isolation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="wordmark" href="index.html"><span class="kanji">太刀</span> tachi-agent</a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="get-started.html">Get started</a></li>
+        <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow hero-anim d1">// L3 — the new feature</p>
+      <h1 class="hero-anim d2"><span class="accent">Swarm.</span> Fan out, then synthesize.</h1>
+      <p class="hero-sub hero-anim d3">
+        N role-specialized agents run the <strong>same task</strong> in parallel — each the same
+        Orchestrator unit with a different role-lens. A separate <strong>synthesizer</strong>
+        merges their answers into one. Diverse perspectives, not <em>N identical runs</em>.
+      </p>
+      <div class="cta-row hero-anim d5">
+        <a class="btn btn-primary" href="#usage">See usage →</a>
+        <a class="btn" href="architecture.html">Architecture</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== SWARM DIAGRAM ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">01</span>
+          <span class="sec-kicker"><span class="box">┌─</span> the shape</span>
+          <h2 class="sec-title">One task, many lenses, one answer.</h2>
+        </div>
+
+        <div class="diagram">
+          <svg viewBox="0 0 960 640" role="img" aria-labelledby="swarmTitle swarmDesc" width="960" height="640">
+            <title id="swarmTitle">tachi-agent swarm topology</title>
+            <desc id="swarmDesc">One task fans out to three parallel role agents — implementer, critic, and researcher — each an independent Orchestrator run. Their labeled answers flow into a single synthesizer agent, which merges them into one final answer and may call tachibot_council or tachibot_jury to adjudicate.</desc>
+            <defs>
+              <marker id="sArrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 z" fill="#E4572E" />
+              </marker>
+            </defs>
+
+            <!-- Task -->
+            <rect class="svg-node-accent" x="370" y="24" width="220" height="64" rx="2" stroke-width="2" />
+            <text class="svg-label" x="480" y="52" text-anchor="middle" font-size="15" font-weight="700">one task</text>
+            <text class="svg-label-mono" x="480" y="72" text-anchor="middle" font-size="11">unique traceId</text>
+
+            <!-- fan-out lines -->
+            <line class="svg-edge-accent" x1="440" y1="88" x2="190" y2="184" stroke-width="2" marker-end="url(#sArrow)" />
+            <line class="svg-edge-accent" x1="480" y1="88" x2="480" y2="184" stroke-width="2" marker-end="url(#sArrow)" />
+            <line class="svg-edge-accent" x1="520" y1="88" x2="770" y2="184" stroke-width="2" marker-end="url(#sArrow)" />
+            <text class="svg-label-mono" x="300" y="135" text-anchor="middle" font-size="11" fill="#E4572E">parallel · cap 4</text>
+
+            <!-- Role agents -->
+            <rect class="svg-node" x="50" y="190" width="280" height="110" rx="2" />
+            <text class="svg-label" x="190" y="220" text-anchor="middle" font-size="14" font-weight="700">implementer</text>
+            <text class="svg-label-mono" x="190" y="244" text-anchor="middle" font-size="11">role-lens system prompt</text>
+            <text class="svg-label-mono" x="190" y="262" text-anchor="middle" font-size="11">own driver (optional)</text>
+            <text class="svg-label-mono" x="190" y="284" text-anchor="middle" font-size="10.5" fill="#F2C14E">swarm:&lt;traceId&gt;:implementer</text>
+
+            <rect class="svg-node" x="340" y="190" width="280" height="110" rx="2" />
+            <text class="svg-label" x="480" y="220" text-anchor="middle" font-size="14" font-weight="700">critic</text>
+            <text class="svg-label-mono" x="480" y="244" text-anchor="middle" font-size="11">role-lens system prompt</text>
+            <text class="svg-label-mono" x="480" y="262" text-anchor="middle" font-size="11">may be marked critical</text>
+            <text class="svg-label-mono" x="480" y="284" text-anchor="middle" font-size="10.5" fill="#F2C14E">swarm:&lt;traceId&gt;:critic</text>
+
+            <rect class="svg-node" x="630" y="190" width="280" height="110" rx="2" />
+            <text class="svg-label" x="770" y="220" text-anchor="middle" font-size="14" font-weight="700">researcher</text>
+            <text class="svg-label-mono" x="770" y="244" text-anchor="middle" font-size="11">role-lens system prompt</text>
+            <text class="svg-label-mono" x="770" y="262" text-anchor="middle" font-size="11">independent run</text>
+            <text class="svg-label-mono" x="770" y="284" text-anchor="middle" font-size="10.5" fill="#F2C14E">swarm:&lt;traceId&gt;:researcher</text>
+
+            <!-- fan-in lines -->
+            <line class="svg-edge-accent" x1="190" y1="300" x2="430" y2="396" stroke-width="2" marker-end="url(#sArrow)" />
+            <line class="svg-edge-accent" x1="480" y1="300" x2="480" y2="396" stroke-width="2" marker-end="url(#sArrow)" />
+            <line class="svg-edge-accent" x1="770" y1="300" x2="530" y2="396" stroke-width="2" marker-end="url(#sArrow)" />
+            <text class="svg-label-mono" x="660" y="350" text-anchor="middle" font-size="11" fill="#E4572E">labeled answers</text>
+
+            <!-- Synthesizer (pulsing) -->
+            <g class="pulse">
+              <rect class="svg-node-accent" x="330" y="402" width="300" height="96" rx="2" stroke-width="2.5" />
+            </g>
+            <text class="svg-label" x="480" y="434" text-anchor="middle" font-size="15" font-weight="700">synthesizer</text>
+            <text class="svg-label-mono" x="480" y="458" text-anchor="middle" font-size="11">merges labeled answers</text>
+            <text class="svg-label" x="480" y="480" text-anchor="middle" font-size="12" fill="#F2C14E">tachibot_council / _jury</text>
+
+            <!-- final -->
+            <line class="svg-edge-accent" x1="480" y1="498" x2="480" y2="548" stroke-width="2" marker-end="url(#sArrow)" />
+            <rect class="svg-node" x="370" y="554" width="220" height="58" rx="2" />
+            <text class="svg-label" x="480" y="582" text-anchor="middle" font-size="14" font-weight="700">one answer</text>
+            <text class="svg-label-mono" x="480" y="600" text-anchor="middle" font-size="10.5" fill="#F2C14E">logged once · swarm:&lt;traceId&gt;</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== HOW IT WORKS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">//</span> how it works</span>
+          <h2 class="sec-title">Same unit, different lens.</h2>
+        </div>
+        <div class="prose">
+          <p class="lede">
+            Each member is the <strong>same Orchestrator</strong> you already run — just given a
+            different role-lens system prompt and, optionally, a different driver. They all
+            execute the identical task in parallel.
+          </p>
+          <p>
+            A separate <strong>synthesizer</strong> agent then runs over the members' labeled
+            answers and returns one merged result. When the council tools are present it calls
+            <code>tachibot_council</code> / <code>tachibot_jury</code> to adjudicate disagreements —
+            so the final answer is reconciled, not just concatenated.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== BEHAVIOR ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">02</span>
+          <span class="sec-kicker"><span class="box">┌─</span> behavior</span>
+          <h2 class="sec-title">Bounded, fault-tolerant, isolated.</h2>
+        </div>
+
+        <div class="cards">
+          <article class="card" data-num="01">
+            <span class="card-tag">parallel, bounded</span>
+            <h3>Concurrency cap</h3>
+            <p>
+              Members run concurrently behind a small cap (default <code>4</code>) so big rosters
+              don't fan out unbounded. Each member inherits the orchestrator's
+              <code>maxIterations</code> / <code>timeoutMs</code> / cost tracking.
+            </p>
+          </article>
+          <article class="card" data-num="02">
+            <span class="card-tag">failure-tolerant + quorum</span>
+            <h3>Errors don't sink it</h3>
+            <p>
+              A member that errors or times out is recorded with an empty answer and excluded
+              from synthesis. Too few answers — or a missing <code>critical</code> role — surfaces
+              a non-fatal <strong>warning</strong>, never a crash.
+            </p>
+          </article>
+          <article class="card" data-num="03">
+            <span class="card-tag">synthesis</span>
+            <h3>Merge, then adjudicate</h3>
+            <p>
+              A dedicated synthesizer runs over the labeled answers and returns one merged result.
+              If council tools are connected it uses <code>tachibot_council</code> /
+              <code>tachibot_jury</code> to resolve disagreement.
+            </p>
+          </article>
+          <article class="card" data-num="04">
+            <span class="card-tag">memory isolation</span>
+            <h3>No peeking at peers</h3>
+            <p>
+              Each run gets a unique <code>traceId</code>. Members are independent: each writes its
+              own session <code>swarm:&lt;traceId&gt;:&lt;role&gt;</code> and never reads peers' or
+              prior runs' memory. The final answer is logged once under <code>swarm:&lt;traceId&gt;</code>.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== USAGE ===================== -->
+    <section class="section reveal" id="usage">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">03</span>
+          <span class="sec-kicker"><span class="box">//</span> usage</span>
+          <h2 class="sec-title">Run it three ways.</h2>
+        </div>
+
+        <div class="prose"><p class="lede">Default roster: <strong>implementer · critic · researcher</strong>.</p></div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — default roles</span>
+            <button class="copy-btn" aria-label="Copy command to clipboard">copy</button>
+          </div>
+<pre>npm run swarm -- <span class="s">"design a rate limiter for the gateway"</span>
+<span class="c"># default roles: implementer · critic · researcher</span></pre>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — custom roster via env</span>
+            <button class="copy-btn" aria-label="Copy command to clipboard">copy</button>
+          </div>
+<pre><span class="c"># comma-separated: `name` or `name:driver` · empty = defaults</span>
+<span class="k">export</span> TACHI_SWARM_ROLES=<span class="s">"implementer,critic:hermes,security,researcher"</span>
+npm run swarm -- <span class="s">"review this auth flow"</span></pre>
+        </div>
+
+        <div class="code" data-lang="ts">
+          <div class="code-head">
+            <span class="code-label">typescript — programmatic</span>
+            <button class="copy-btn" aria-label="Copy code to clipboard">copy</button>
+          </div>
+<pre><span class="k">import</span> { buildSwarmFromEnv } <span class="k">from</span> <span class="s">"tachi-agent"</span>;
+
+<span class="k">const</span> swarm = <span class="k">await</span> buildSwarmFromEnv();
+<span class="k">try</span> {
+  <span class="k">const</span> { answer, members, warnings } = <span class="k">await</span> swarm.run(<span class="s">"design a rate limiter"</span>);
+  console.log(answer);
+} <span class="k">finally</span> {
+  <span class="k">await</span> swarm.close();
+}</pre>
+        </div>
+
+        <div class="prose">
+          <p>
+            Progress streams to <strong>stderr</strong> — one line per member, any warnings, and
+            the trace id. The final synthesized answer prints to <strong>stdout</strong>.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP</div>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="deploy.html">Deploy</a>
+        <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="footer-mark" aria-hidden="true">太刀</div>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

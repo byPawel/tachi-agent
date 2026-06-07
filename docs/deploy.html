@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deploy &amp; Gateway — tachi-agent</title>
+  <meta name="description" content="Deploy tachi-agent: default local CLI, or wrap orchestrator.run behind a thin Gateway (run_agent MCP / HTTP+SSE). Daemon, UnifiedClient, OpenClaw bridge, and security posture." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="wordmark" href="index.html"><span class="kanji">太刀</span> tachi-agent</a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="get-started.html">Get started</a></li>
+        <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow hero-anim d1">// run it anywhere</p>
+      <h1 class="hero-anim d2">Deploy &amp; Gateway</h1>
+      <p class="hero-sub hero-anim d3">
+        Start on the <strong>local CLI</strong> — zero infra, fully on-device. Scale out by
+        wrapping <strong>orchestrator.run</strong> behind a thin service. Keep the model local
+        even when hosted, so the <em>privacy story holds</em>.
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== DEPLOY OPTIONS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">01</span>
+          <span class="sec-kicker"><span class="box">┌─</span> options</span>
+          <h2 class="sec-title">Local first. Hosted when you need it.</h2>
+        </div>
+
+        <div class="grid-2">
+          <article class="card" data-num="01">
+            <span class="card-tag">default</span>
+            <h3>Local CLI</h3>
+            <p>
+              The most private path: zero infrastructure, fully on-device. The brain
+              (Qwen2.5 / Ollama) and tools (stdio MCP) all run locally. Nothing leaves the box.
+            </p>
+          </article>
+          <article class="card" data-num="02">
+            <span class="card-tag">scale out</span>
+            <h3>Gateway</h3>
+            <p>
+              Wrap <code>orchestrator.run</code> behind a thin service — a <code>run_agent</code>
+              MCP server for Claude Code, or an HTTP/SSE gateway for Telegram/Slack. Put
+              <strong>auth, rate-limits, and a per-tenant allowlist</strong> at the edge. Keep the
+              model local even when hosted; cloud secrets stay in <code>tachibot-mcp</code>.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== GATEWAY API ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">02</span>
+          <span class="sec-kicker"><span class="box">//</span> gateway API</span>
+          <h2 class="sec-title">Async jobs + an SSE stream.</h2>
+          <p class="sec-lead">All requests require <code>Authorization: Bearer &lt;token&gt;</code>. The async-job + SSE shape survives disconnects — resume replay via <code>Last-Event-ID</code>.</p>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — start the gateway</span>
+            <button class="copy-btn" aria-label="Copy command to clipboard">copy</button>
+          </div>
+<pre><span class="k">export</span> GATEWAY_TOKEN=<span class="s">"change-me"</span> GATEWAY_PORT=8787
+<span class="k">export</span> TACHIBOT_CMD=<span class="s">"npx -y tachibot-mcp"</span>
+npm run build &amp;&amp; node dist/frontends/gateway.js</pre>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Method &amp; path</th><th>Response</th><th>Purpose</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>POST /runs</code><br /><span style="color:var(--muted);font-size:.85em">{task, maxIterations?}</span></td>
+                <td><code>202 {run_id}</code></td>
+                <td>Start a run (async job).</td>
+              </tr>
+              <tr>
+                <td><code>GET /runs/:id</code></td>
+                <td>state + result</td>
+                <td>Poll run state and final result.</td>
+              </tr>
+              <tr>
+                <td><code>GET /runs/:id/events</code></td>
+                <td><strong>SSE</strong></td>
+                <td>Stream <code>step</code> / <code>assistant</code> / <code>tool-result</code> / <code>final</code> / <code>error</code> / <code>heartbeat</code>.</td>
+              </tr>
+              <tr>
+                <td><code>DELETE /runs/:id</code></td>
+                <td>cancel</td>
+                <td>Cooperative abort (Ctrl-C semantics).</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== DAEMON ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">┌─</span> L2.5 — daemon</span>
+          <h2 class="sec-title">Long-running, attachable, resumable.</h2>
+        </div>
+        <div class="prose">
+          <p class="lede">A long-running daemon reuses the gateway and lets thin clients attach mid-run.</p>
+          <ul>
+            <li><strong>Thin-client attach + session handoff.</strong> Detach and reconnect without losing the run.</li>
+            <li><strong>Durable monotonic event sequence.</strong> Buffered replay on reconnect via <code>Last-Event-ID</code>.</li>
+            <li><strong>Refcount-aware TTL / GC.</strong> Runs evict when no client holds a reference; graceful drain on shutdown.</li>
+            <li><strong>UnifiedClient.</strong> Makes local and daemon execution interchangeable — swap a single constructor, no behavior change.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== OPENCLAW BRIDGE ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">//</span> OpenClaw bridge</span>
+          <h2 class="sec-title">Delegate over the gateway.</h2>
+        </div>
+        <div class="prose">
+          <p>
+            Let OpenClaw delegate tasks to tachi-agent over the gateway's HTTP/SSE API. Run the
+            gateway with a <code>GATEWAY_TOKEN</code>, then use the bundled <code>GatewayClient</code>:
+          </p>
+        </div>
+        <div class="code" data-lang="ts">
+          <div class="code-head">
+            <span class="code-label">typescript — GatewayClient</span>
+            <button class="copy-btn" aria-label="Copy code to clipboard">copy</button>
+          </div>
+<pre><span class="k">import</span> { GatewayClient } <span class="k">from</span> <span class="s">"tachi-agent"</span>;
+
+<span class="k">const</span> tachi = <span class="k">new</span> GatewayClient({
+  baseUrl: <span class="s">"http://127.0.0.1:8787"</span>,
+  token: process.env.TACHI_GATEWAY_TOKEN!,
+});
+<span class="k">const</span> answer = <span class="k">await</span> tachi.runAndWait(<span class="s">"research X"</span>);</pre>
+        </div>
+        <div class="prose">
+          <p>See <a href="openclaw-bridge.md">docs/openclaw-bridge.md</a> for plugin / skill wiring.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SECURITY ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">03</span>
+          <span class="sec-kicker"><span class="box">┌─</span> security posture</span>
+          <h2 class="sec-title">Local-first is the security model.</h2>
+        </div>
+
+        <div class="cards">
+          <article class="card" data-num="01">
+            <span class="card-tag">local-first</span>
+            <h3>Near-zero secret surface</h3>
+            <p>
+              Default brain is Qwen2.5 on <code>127.0.0.1</code> (no SSRF); tools run over local
+              stdio. tachi-agent holds <strong>no cloud keys</strong> — the council's provider keys
+              live in <code>tachibot-mcp</code>.
+            </p>
+          </article>
+          <article class="card" data-num="02">
+            <span class="card-tag">trust boundary</span>
+            <h3>Config, not messages</h3>
+            <p>
+              MCP server commands come only from config / env (<code>*_CMD</code>), never from a
+              user or model message — no command injection. The <code>allow</code> list keeps
+              dangerous tools out unless granted.
+            </p>
+          </article>
+          <article class="card" data-num="03">
+            <span class="card-tag">edge auth</span>
+            <h3>Untrusted front-ends</h3>
+            <p>
+              Telegram / Slack / HTTP authenticate at the edge — allowed user-ids, app tokens,
+              localhost-only MCP. The task string is <em>data</em>; the agent can only call
+              allowlisted tools, never arbitrary shell.
+            </p>
+          </article>
+          <article class="card" data-num="04">
+            <span class="card-tag">prompt injection</span>
+            <h3>Tool output is untrusted</h3>
+            <p>
+              Search and tool results may carry injection. Mitigate with a bounded allowlist
+              (no shell / file-write by default), treat tool output as untrusted data, and gate
+              any write tool behind approval (roadmap).
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP</div>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="swarm.html">Swarm</a>
+        <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="footer-mark" aria-hidden="true">太刀</div>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
