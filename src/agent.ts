@@ -83,6 +83,12 @@ export class Orchestrator {
       }
     }
 
+    // Memory-in-loop (opt-in): a refreshable "live memory" system block kept near
+    // the top so each iteration sees recall refreshed for the evolving state.
+    // Gated so the default path (memoryInLoop unset/false) is byte-identical.
+    const memoryInLoop = (this.opts.memoryInLoop ?? false) && !!this.memory;
+    const liveMemory: ChatMessage | null = memoryInLoop ? { role: "system", content: "" } : null;
+
     const messages: ChatMessage[] = [
       {
         role: "system",
@@ -92,6 +98,7 @@ export class Orchestrator {
           (recalled ? `\n\n--- Relevant prior context (memory) ---\n${recalled}` : "") +
           grounding,
       },
+      ...(liveMemory ? [liveMemory] : []),
       { role: "user", content: task },
     ];
 
@@ -123,6 +130,17 @@ export class Orchestrator {
         emit({ type: "tool-result", name: tc.name, result });
         toolCalls.push({ name: tc.name, args: tc.arguments, result });
         messages.push({ role: "tool", content: result, toolCallId: tc.name });
+      }
+
+      // Memory-in-loop (opt-in): per-step note + recall refresh for the next turn.
+      if (memoryInLoop && this.memory) {
+        if (this.memory.note) {
+          const summary = (res.content?.trim() || res.toolCalls.map((c) => c.name).join(", ")).slice(0, 800);
+          await safe(() => this.memory!.note!({ task, note: `step ${iterations}: ${summary}` }, this.opts.signal), undefined);
+        }
+        const focus = lastAssistantText(messages) || task;
+        const refreshed = await safe(() => this.memory!.recall(focus, this.opts.signal), "");
+        if (liveMemory) liveMemory.content = refreshed ? `--- Live memory (refreshed for the current step) ---\n${refreshed}` : "";
       }
     }
 
