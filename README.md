@@ -29,6 +29,16 @@ flowchart TD
 | **`ToolHost`** | add or remove MCP servers and tools (config, not code) | **dokoro** + **tachibot** merged, namespaced `${server}_${tool}` |
 | **`Memory`** | swap or disable persistent context | **dokoro** session recall / log |
 
+### Memory in the loop (opt-in)
+
+By default memory is a **bookend** — `recall` before the loop, `log` after. Set
+**`memoryInLoop: true`** in `OrchestratorOptions` and the loop also refreshes recall
+each iteration (kept in one in-place "live memory" block, no context bloat) and writes
+a per-step working-memory note via `Memory.note` → dokoro `shared_note_append` (the
+append-only, agent-tagged blackboard). Off by default — it adds per-step tool calls
+that a small local model handles poorly — but valuable for long, multi-step tasks.
+Existing callers are unaffected.
+
 Because the core depends only on these interfaces, every integration composes the
 same hub without modifying it:
 

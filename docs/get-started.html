@@ -170,7 +170,13 @@ registerDriver(<span class="s">"hermes"</span>, () =&gt; <span class="k">new</sp
   driver: <span class="s">"hermes"</span>,
   host,
   memory,
-  options: { maxIterations: 12, timeoutMs: 90_000, signal: controller.signal },
+  options: {
+    maxIterations: 12,
+    timeoutMs: 90_000,
+    signal: controller.signal,
+    <span class="c">// memoryInLoop: true  // opt-in: refresh recall + write a working-memory note</span>
+    <span class="c">//                    // each iteration. Off by default (adds per-step tool calls).</span>
+  },
 }).run(<span class="s">"verify HEAD against ADR-1..3"</span>);
 <span class="c">// elsewhere: controller.abort() → run halts with haltedBy: "aborted"</span></pre>
         </div>

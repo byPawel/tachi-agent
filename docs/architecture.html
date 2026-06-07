@@ -228,6 +228,42 @@ dokoro_session_recall
         </div>
       </div>
     </section>
+    <!-- ===================== MEMORY IN THE LOOP ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">04</span>
+          <span class="sec-kicker"><span class="box">//</span> memory in the loop (opt-in)</span>
+          <h2 class="sec-title">Bookend by default. In-loop when you need it.</h2>
+        </div>
+        <div class="split">
+          <div class="prose">
+            <p class="lede">By default memory is a <strong>bookend</strong> — <code>recall</code> once before the loop, <code>log</code> once after. Set <strong><code>memoryInLoop: true</code></strong> in <code>OrchestratorOptions</code> to go further:</p>
+            <ul>
+              <li><strong>Per-iteration recall.</strong> The hub refreshes context each tool-calling step, keyed on the evolving conversation. A single in-place "live memory" block is rewritten in-place — no context bloat.</li>
+              <li><strong>Per-step notes.</strong> Each iteration writes a working-memory note via <code>Memory.note</code> → dokoro <code>shared_note_append</code> — the append-only, agent-tagged blackboard.</li>
+              <li><strong>Off by default.</strong> The extra per-step tool calls degrade small local models; zero behavior change for existing callers. Enable for long, multi-step tasks.</li>
+            </ul>
+          </div>
+          <div class="code" data-lang="ts">
+            <div class="code-head">
+              <span class="code-label">typescript — opt in</span>
+              <button class="copy-btn" aria-label="Copy code to clipboard">copy</button>
+            </div>
+<pre><span class="k">const</span> result = <span class="k">await</span> createOrchestrator({
+  driver,
+  host,
+  memory,
+  options: {
+    maxIterations: 20,
+    timeoutMs: 120_000,
+    <span class="k">memoryInLoop</span>: <span class="k">true</span>,  <span class="c">// opt-in</span>
+  },
+}).run(<span class="s">"audit every ADR and flag gaps"</span>);</pre>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <!-- ===================== FOOTER ===================== -->
