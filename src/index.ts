@@ -11,6 +11,8 @@
 export * from "./types.js";
 export { Orchestrator } from "./agent.js";
 export { registerDriver, getDriver, listDrivers } from "./registry.js";
+export { GatewayClient, GatewayHttpError } from "./bridge/openclaw/index.js";
+export type { GatewayClientConfig, RunOutcome, RunState, StartedRun } from "./bridge/openclaw/index.js";
 import "./drivers/register.js"; // side-effect: register built-in "ollama" + "hermes" drivers
 
 import { Orchestrator } from "./agent.js";
