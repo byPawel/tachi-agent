@@ -6,7 +6,8 @@ export type RunStatus = "running" | "done" | "error" | "aborted";
 export type GatewayEvent =
   | AgentEvent
   | { type: "error"; message: string }
-  | { type: "heartbeat" };
+  | { type: "heartbeat" }
+  | { type: "shutdown"; reason: string };
 
 /** One buffered event tagged with its durable, monotonic per-run sequence number. */
 export interface SeqEvent {

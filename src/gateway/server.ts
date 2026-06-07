@@ -21,8 +21,22 @@ export interface GatewayOptions {
   maxConcurrentPerTenant?: number;
   /** Per-run event ring-buffer cap (Last-Event-ID replay depth). Default TACHI_SESSION_BUFFER_MAX ?? 10000. */
   sessionBufferMax?: number;
+  /**
+   * Optional drain control surface (used by the daemon). When `draining` is true,
+   * new `POST /runs` are rejected with 503; the daemon broadcasts a final shutdown
+   * frame to every live SSE sink tracked in `sinks` before exiting.
+   */
+  controls?: GatewayControls;
   /** Token config source. Defaults to process.env. */
   env?: { GATEWAY_TOKENS?: string; GATEWAY_TOKEN?: string };
+}
+
+/** Mutable drain control surface shared between the gateway and its owner (the daemon). */
+export interface GatewayControls {
+  /** When true, the gateway rejects new runs with 503 (drain mode). */
+  draining: boolean;
+  /** Every currently-open SSE response (a live event sink). */
+  sinks: Set<http.ServerResponse>;
 }
 
 class HttpError extends Error {
@@ -57,6 +71,7 @@ export function createGatewayServer(
   const heartbeatMs = opts.heartbeatMs ?? 15000;
   const maxConcurrent = opts.maxConcurrentPerTenant ?? 16;
   const iterationCeiling = opts.maxIterations ?? 50;
+  const controls = opts.controls;
 
   return http.createServer(async (req, res) => {
     try {
@@ -68,6 +83,7 @@ export function createGatewayServer(
 
       // POST /runs
       if (req.method === "POST" && parts.length === 1 && parts[0] === "runs") {
+        if (controls?.draining) { req.resume(); return json(res, 503, { error: "server draining" }); } // reject new work (drain the body so the socket frees)
         if (Number(req.headers["content-length"] ?? 0) > MAX_BODY_BYTES) {
           return json(res, 413, { error: "request body too large" });
         }
@@ -123,6 +139,7 @@ export function createGatewayServer(
 
           res.writeHead(200, SSE_HEADERS);
           registry.incRef(record.id); // a live SSE sink — refcount guards GC + drain
+          controls?.sinks.add(res);   // track for drain-time shutdown broadcast
 
           // Subscribe-then-replay (no await between) so an append during replay can't
           // be dropped or duplicated: live events arriving before we go live are queued,
@@ -154,6 +171,7 @@ export function createGatewayServer(
             clearInterval(heartbeat);
             unsub();
             registry.decRef(record.id);
+            controls?.sinks.delete(res);
           };
           const unsub = registry.subscribe(record.id, (e, seq) => {
             if (!live) { pending.push({ event: e, seq }); return; }

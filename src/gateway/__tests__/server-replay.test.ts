@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { createGatewayServer } from "../server.js";
+import { createGatewayServer, type GatewayControls } from "../server.js";
 import type { AgentEvent } from "../../types.js";
 
 const AUTH = { Authorization: "Bearer s3cret", "Content-Type": "application/json" };
@@ -179,6 +179,27 @@ describe("gateway Last-Event-ID replay", () => {
     await reader.cancel().catch(() => {});
     expect(heartbeatId).toBe(2);
     release();
+  });
+
+  it("drain controls: a finished run's SSE adds then removes its sink (net zero)", async () => {
+    const controls: GatewayControls = { draining: false, sinks: new Set() };
+    const { runtime, release } = controllableRuntime(1);
+    const base = await start(runtime, { controls });
+    const { run_id } = (await (await fetch(`${base}/runs`, { method: "POST", headers: AUTH, body: JSON.stringify({ task: "x" }) })).json()) as { run_id: string };
+    release(); // let the run reach `final` so the SSE stream ends on its own
+    await new Promise((r) => setTimeout(r, 20));
+    // Consume the full stream — it ends after `final`; the sink is added then removed.
+    await (await fetch(`${base}/runs/${run_id}/events`, { headers: { Authorization: "Bearer s3cret" } })).text();
+    expect(controls.sinks.size).toBe(0);
+  });
+
+  it("drain controls: rejects new runs with 503 once draining", async () => {
+    const controls: GatewayControls = { draining: true, sinks: new Set() };
+    const { runtime } = controllableRuntime(1);
+    const base = await start(runtime, { controls });
+    const res = await fetch(`${base}/runs`, { method: "POST", headers: AUTH, body: JSON.stringify({ task: "y" }) });
+    expect(res.status).toBe(503);
+    expect((await res.json() as { error: string }).error).toMatch(/drain/);
   });
 
   it("does NOT 409 when Last-Event-ID is exactly minSeq-1 (boundary, no gap)", async () => {
