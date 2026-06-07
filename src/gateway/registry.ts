@@ -17,6 +17,8 @@ export interface RunRegistryOptions {
 export class RunRegistry {
   private runs = new Map<string, RunRecord>();
   private subs = new Map<string, Set<Subscriber>>();
+  /** Live SSE-sink count per run (a connected client). Drives GC + drain. */
+  private refs = new Map<string, number>();
   private readonly bufferMax: number;
 
   constructor(opts: RunRegistryOptions = {}) {
@@ -89,6 +91,25 @@ export class RunRegistry {
     if (!set) { set = new Set(); this.subs.set(id, set); }
     set.add(cb);
     return () => { set!.delete(cb); };
+  }
+
+  /** Increment the run's live-subscriber refcount; returns the new count. */
+  incRef(id: string): number {
+    const n = (this.refs.get(id) ?? 0) + 1;
+    this.refs.set(id, n);
+    return n;
+  }
+
+  /** Decrement the run's live-subscriber refcount (floored at 0); returns the new count. */
+  decRef(id: string): number {
+    const n = Math.max(0, (this.refs.get(id) ?? 0) - 1);
+    if (n === 0) this.refs.delete(id); else this.refs.set(id, n);
+    return n;
+  }
+
+  /** Current live-subscriber count for a run (0 if none). */
+  refcount(id: string): number {
+    return this.refs.get(id) ?? 0;
   }
 
   finish(id: string, status: RunStatus, result?: RunResult, error?: string): void {

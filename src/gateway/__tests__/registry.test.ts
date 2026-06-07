@@ -69,6 +69,19 @@ describe("RunRegistry", () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it("refcount: incRef/decRef track live subscribers, floored at 0", () => {
+    const reg = new RunRegistry();
+    const rec = reg.create("a", "t");
+    expect(reg.refcount(rec.id)).toBe(0);
+    expect(reg.incRef(rec.id)).toBe(1);
+    expect(reg.incRef(rec.id)).toBe(2);
+    expect(reg.refcount(rec.id)).toBe(2);
+    expect(reg.decRef(rec.id)).toBe(1);
+    expect(reg.decRef(rec.id)).toBe(0);
+    expect(reg.decRef(rec.id)).toBe(0); // never goes negative
+    expect(reg.refcount(rec.id)).toBe(0);
+  });
+
   it("abort() trips the signal and sets status aborted", () => {
     const reg = new RunRegistry();
     const rec = reg.create("a", "t");

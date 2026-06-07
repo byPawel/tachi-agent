@@ -127,6 +127,60 @@ describe("gateway Last-Event-ID replay", () => {
     release();
   });
 
+  it("POST /runs/:id/cancel wire-cancels the run (status → aborted)", async () => {
+    const { runtime } = controllableRuntime(1);
+    const base = await start(runtime);
+    const { run_id } = (await (await fetch(`${base}/runs`, { method: "POST", headers: AUTH, body: JSON.stringify({ task: "x" }) })).json()) as { run_id: string };
+    const res = await fetch(`${base}/runs/${run_id}/cancel`, { method: "POST", headers: AUTH });
+    expect(res.status).toBe(202);
+    expect((await res.json() as { status: string }).status).toBe("aborted");
+
+    // The run actually settles aborted (the orchestrator's abort listener resolves it).
+    let state: { status: string } = { status: "running" };
+    for (let i = 0; i < 30 && state.status === "running"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      state = await (await fetch(`${base}/runs/${run_id}`, { headers: AUTH })).json() as { status: string };
+    }
+    expect(state.status).toBe("aborted");
+  });
+
+  it("heartbeat frames carry the run's current seq as the SSE id", async () => {
+    const { runtime, release } = controllableRuntime(2); // seq 1,2 buffered, then idle
+    const base = await start(runtime, { heartbeatMs: 15 }); // fast heartbeats
+    const { run_id } = (await (await fetch(`${base}/runs`, { method: "POST", headers: AUTH, body: JSON.stringify({ task: "x" }) })).json()) as { run_id: string };
+    await new Promise((r) => setTimeout(r, 20));
+
+    const ac = new AbortController();
+    const res = await fetch(`${base}/runs/${run_id}/events`, {
+      headers: { Authorization: "Bearer s3cret", "Last-Event-ID": "2" }, // skip replay → next frame is a heartbeat
+      signal: ac.signal,
+    });
+    // First id-bearing frame is a heartbeat carrying maxSeq (=2).
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let heartbeatId: number | undefined;
+    for (let i = 0; i < 50 && heartbeatId === undefined; i++) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let sep = buf.indexOf("\n\n");
+      while (sep !== -1) {
+        const block = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        if (/event: heartbeat/.test(block)) {
+          const m = /^id: (\d+)$/m.exec(block);
+          if (m) { heartbeatId = Number(m[1]); break; }
+        }
+        sep = buf.indexOf("\n\n");
+      }
+    }
+    ac.abort();
+    await reader.cancel().catch(() => {});
+    expect(heartbeatId).toBe(2);
+    release();
+  });
+
   it("does NOT 409 when Last-Event-ID is exactly minSeq-1 (boundary, no gap)", async () => {
     const { runtime, release } = controllableRuntime(5);
     const base = await start(runtime, { sessionBufferMax: 3 }); // minSeq=3 after 5 steps

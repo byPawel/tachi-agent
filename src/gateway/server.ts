@@ -122,11 +122,13 @@ export function createGatewayServer(
           }
 
           res.writeHead(200, SSE_HEADERS);
+          registry.incRef(record.id); // a live SSE sink — refcount guards GC + drain
 
           // Subscribe-then-replay (no await between) so an append during replay can't
           // be dropped or duplicated: live events arriving before we go live are queued,
           // then flushed by seq once, deduped against what replay already wrote.
           let live = false;
+          let closed = false;
           let lastWritten = lastEventId;
           const pending: Array<{ event: GatewayEvent; seq: number }> = [];
           const write = (e: GatewayEvent, seq: number): boolean => {
@@ -138,10 +140,21 @@ export function createGatewayServer(
             } catch { cleanup(); res.end(); return false; }
           };
 
+          // Heartbeats carry the run's current max seq as the SSE id: so an idle client
+          // keeps its resume cursor fresh (reconnect asks for `> seq` correctly).
           const heartbeat = setInterval(() => {
-            try { res.write(formatSse({ type: "heartbeat" })); } catch { cleanup(); res.end(); }
+            try {
+              const cur = registry.maxSeq(record.id);
+              res.write(cur > 0 ? formatSse({ type: "heartbeat" }, cur) : formatSse({ type: "heartbeat" }));
+            } catch { cleanup(); res.end(); }
           }, heartbeatMs);
-          const cleanup = () => { clearInterval(heartbeat); unsub(); };
+          const cleanup = () => {
+            if (closed) return; // idempotent: req close + final can both fire
+            closed = true;
+            clearInterval(heartbeat);
+            unsub();
+            registry.decRef(record.id);
+          };
           const unsub = registry.subscribe(record.id, (e, seq) => {
             if (!live) { pending.push({ event: e, seq }); return; }
             write(e, seq);
@@ -169,6 +182,12 @@ export function createGatewayServer(
 
         // DELETE /runs/:id  → cancel
         if (req.method === "DELETE" && parts.length === 2) {
+          registry.abort(record.id);
+          return json(res, 202, { run_id: record.id, status: "aborted" });
+        }
+
+        // POST /runs/:id/cancel  → wire-cancel (the client maps an aborted signal here)
+        if (req.method === "POST" && parts.length === 3 && parts[2] === "cancel") {
           registry.abort(record.id);
           return json(res, 202, { run_id: record.id, status: "aborted" });
         }
