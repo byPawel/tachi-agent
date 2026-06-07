@@ -89,4 +89,24 @@ export class DokoroMemory implements Memory {
       /* best-effort; never fail the run on a logging error */
     }
   }
+
+  /**
+   * Working-memory note → dokoro `shared_note_append` (append-only blackboard,
+   * agent-tagged, WAL-safe). No-op if the tool isn't connected/allowlisted.
+   */
+  async note(entry: { task: string; note: string }, signal?: AbortSignal): Promise<void> {
+    const tool = this.find(/shared_note_append$/);
+    if (!tool) return;
+    const args = pickSchemaArgs(tool.parameters, {
+      agent_id: this.aiModel,
+      content: entry.note,
+      note_type: "scratch",
+      metadata: { session_id: this.sessionId, task: entry.task },
+    });
+    try {
+      await this.host.call(tool.name, args, signal);
+    } catch {
+      /* best-effort; never fail the run on a note write */
+    }
+  }
 }

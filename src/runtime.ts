@@ -51,6 +51,7 @@ export const DEFAULT_ALLOW = [
   // discovers recall/log by the `…session_recall`/`…session_summary_add` suffix.
   "dokoro_dokoro_session_recall",
   "dokoro_dokoro_session_summary_add",
+  "dokoro_dokoro_shared_note_append",  // working-memory scratchpad for memoryInLoop (Memory.note)
   "dokoro_dokoro_workspace_status",
 ];
 
