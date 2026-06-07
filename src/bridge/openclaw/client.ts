@@ -11,7 +11,8 @@
  * Zero deps: native fetch + ReadableStream. `fetchImpl` is injectable for tests
  * (mirrors OllamaDriver). The gateway side needs NO changes for this to work.
  */
-import type { AgentEvent } from "../../types.js";
+import type { AgentEvent, RunResult } from "../../types.js";
+import type { UnifiedClient } from "../../client/unified.js";
 import { SseFrameParser } from "./sse-parse.js";
 
 export interface GatewayClientConfig {
@@ -203,4 +204,32 @@ export class GatewayClient {
     }
     return new GatewayHttpError(res.status, `gateway ${res.status}: ${detail}`);
   }
+}
+
+/**
+ * Remote `UnifiedClient` adapter: a thin handle to a running tachi-agent daemon.
+ * `run()` starts a run then streams it to completion over the gateway SSE API,
+ * forwarding every `AgentEvent` and returning a `RunResult` shaped identically to
+ * the local path. `close()` is a no-op (the daemon owns the runtime lifecycle).
+ *
+ * NOTE (Task 6): the resume/replay `attach()` path is added on top of this; `run`
+ * is then expressed as `startRun` + `attach(runId, { lastEventId: 0 })` so a dropped
+ * SSE connection can reconnect with `Last-Event-ID`.
+ */
+export function remoteClient(baseUrl: string, token: string): UnifiedClient {
+  const gw = new GatewayClient({ baseUrl, token });
+  return {
+    async run(text, { onEvent, signal }) {
+      const answer = await gw.runAndWait(text, { onEvent, signal });
+      const result: RunResult = {
+        answer,
+        iterations: 0,
+        toolCalls: [],
+        haltedBy: "final-answer",
+        costUsd: 0,
+      };
+      return result;
+    },
+    close: async () => {},
+  };
 }
