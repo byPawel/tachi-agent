@@ -141,8 +141,10 @@ export class GatewayClient {
     try {
       for (;;) {
         const { value, done } = await reader.read();
-        if (done) break;
-        const frames = parser.push(decoder.decode(value, { stream: true }));
+        // On the final read, flush any bytes the TextDecoder held across a chunk
+        // boundary (a multi-byte UTF-8 char split in the tail); else decode streaming.
+        const chunk = done ? decoder.decode() : decoder.decode(value, { stream: true });
+        const frames = parser.push(chunk);
         for (const frame of frames) {
           if (frame.event === "heartbeat") continue;
           const event = JSON.parse(frame.data) as AgentEvent | { type: "error"; message: string };
@@ -155,7 +157,7 @@ export class GatewayClient {
             }
           }
         }
-        if (outcome) break; // settled — server closes the socket after final/error
+        if (outcome || done) break; // settled, or stream ended (server closes after final/error)
       }
     } finally {
       await reader.cancel().catch(() => {}); // release the socket on early exit/abort

@@ -1,6 +1,8 @@
 // src/bridge/openclaw/__tests__/client.test.ts
 import { describe, it, expect } from "vitest";
 import { GatewayClient, GatewayHttpError } from "../client.js";
+import { formatSse } from "../../../gateway/sse.js";
+import type { AgentEvent } from "../../../types.js";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -65,9 +67,6 @@ describe("GatewayClient.cancel", () => {
     expect(state.status).toBe("aborted");
   });
 });
-
-import { formatSse } from "../../../gateway/sse.js";
-import type { AgentEvent } from "../../../types.js";
 
 /** Build a fetch Response whose body streams the given SSE text in N chunks. */
 function sseResponse(frames: string[]): Response {
