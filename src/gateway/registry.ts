@@ -1,13 +1,29 @@
 // src/gateway/registry.ts
 import { randomUUID } from "node:crypto";
-import type { GatewayEvent, RunRecord, RunStatus } from "./types.js";
+import type { GatewayEvent, RunRecord, RunStatus, SeqEvent } from "./types.js";
 import type { RunResult } from "../types.js";
 
-type Subscriber = (event: GatewayEvent, index: number) => void;
+/** Subscriber callback — receives the event plus its durable monotonic `seq`. */
+type Subscriber = (event: GatewayEvent, seq: number) => void;
+
+/** Default ring-buffer cap per run (Last-Event-ID can replay this many events back). */
+const DEFAULT_BUFFER_MAX = 10_000;
+
+export interface RunRegistryOptions {
+  /** Per-run event ring-buffer cap. Defaults to TACHI_SESSION_BUFFER_MAX ?? 10000. */
+  bufferMax?: number;
+}
 
 export class RunRegistry {
   private runs = new Map<string, RunRecord>();
   private subs = new Map<string, Set<Subscriber>>();
+  private readonly bufferMax: number;
+
+  constructor(opts: RunRegistryOptions = {}) {
+    const envMax = Number(process.env.TACHI_SESSION_BUFFER_MAX);
+    this.bufferMax =
+      opts.bufferMax ?? (Number.isFinite(envMax) && envMax > 0 ? envMax : DEFAULT_BUFFER_MAX);
+  }
 
   create(tenant: string, task: string): RunRecord {
     const record: RunRecord = {
@@ -16,6 +32,7 @@ export class RunRegistry {
       task,
       status: "running",
       events: [],
+      nextSeq: 0,
       controller: new AbortController(),
     };
     this.runs.set(record.id, record);
@@ -30,12 +47,41 @@ export class RunRegistry {
     return [...this.runs.values()].filter((r) => r.tenant === tenant);
   }
 
-  append(id: string, event: GatewayEvent): void {
+  /**
+   * Append an event under a fresh monotonic `seq` (1-based, strictly increasing,
+   * never reused even after ring eviction). Pushes onto the bounded ring buffer
+   * (evicting the oldest past the cap) and notifies subscribers with `(event, seq)`.
+   * Returns the assigned seq (0 if the run is unknown).
+   */
+  append(id: string, event: GatewayEvent): number {
     const record = this.runs.get(id);
-    if (!record) return;
-    const index = record.events.push(event) - 1;
+    if (!record) return 0;
+    const seq = ++record.nextSeq;
+    record.events.push({ seq, event });
+    if (record.events.length > this.bufferMax) record.events.shift(); // evict oldest
     const set = this.subs.get(id);
-    if (set) for (const cb of set) cb(event, index);
+    if (set) for (const cb of set) cb(event, seq);
+    return seq;
+  }
+
+  /** Buffered entries with `seq > after`, in order (drives Last-Event-ID replay). */
+  eventsAfter(id: string, after: number): SeqEvent[] {
+    const record = this.runs.get(id);
+    if (!record) return [];
+    return record.events.filter((e) => e.seq > after);
+  }
+
+  /** Smallest seq still retained in the ring (0 if no events buffered). */
+  minSeq(id: string): number {
+    const record = this.runs.get(id);
+    if (!record || record.events.length === 0) return 0;
+    return record.events[0].seq;
+  }
+
+  /** Largest seq assigned so far (0 if no events). Live streaming resumes at max+1. */
+  maxSeq(id: string): number {
+    const record = this.runs.get(id);
+    return record ? record.nextSeq : 0;
   }
 
   subscribe(id: string, cb: Subscriber): () => void {

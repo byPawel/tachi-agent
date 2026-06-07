@@ -13,15 +13,50 @@ describe("RunRegistry", () => {
     expect(reg.get(rec.id)).toBe(rec);
   });
 
-  it("appends events and notifies subscribers with an index", () => {
+  it("appends events with a strictly-increasing 1-based seq (not array index)", () => {
     const reg = new RunRegistry();
     const rec = reg.create("alice", "t");
     const seen: Array<[string, number]> = [];
-    reg.subscribe(rec.id, (e, i) => seen.push([e.type, i]));
+    reg.subscribe(rec.id, (e, seq) => seen.push([e.type, seq]));
     reg.append(rec.id, { type: "step", iteration: 1 });
     reg.append(rec.id, { type: "heartbeat" });
-    expect(rec.events).toHaveLength(2);
-    expect(seen).toEqual([["step", 0], ["heartbeat", 1]]);
+    reg.append(rec.id, { type: "final", answer: "x", haltedBy: "final-answer" });
+    // subscribers get seq 1, 2, 3 — never array-index-derived (0-based)
+    expect(seen).toEqual([["step", 1], ["heartbeat", 2], ["final", 3]]);
+    expect(reg.maxSeq(rec.id)).toBe(3);
+  });
+
+  it("eventsAfter(k) returns only entries with seq > k, each carrying its seq", () => {
+    const reg = new RunRegistry();
+    const rec = reg.create("a", "t");
+    reg.append(rec.id, { type: "step", iteration: 1 }); // seq 1
+    reg.append(rec.id, { type: "step", iteration: 2 }); // seq 2
+    reg.append(rec.id, { type: "step", iteration: 3 }); // seq 3
+
+    expect(reg.eventsAfter(rec.id, 0).map((x) => x.seq)).toEqual([1, 2, 3]);
+    expect(reg.eventsAfter(rec.id, 1).map((x) => x.seq)).toEqual([2, 3]);
+    expect(reg.eventsAfter(rec.id, 3)).toEqual([]);
+    expect(reg.eventsAfter(rec.id, 1)[0].event).toEqual({ type: "step", iteration: 2 });
+  });
+
+  it("minSeq reflects ring-buffer eviction once the cap is exceeded", () => {
+    const reg = new RunRegistry({ bufferMax: 3 });
+    const rec = reg.create("a", "t");
+    for (let i = 1; i <= 5; i++) reg.append(rec.id, { type: "step", iteration: i });
+    // cap 3 → only seq 3,4,5 retained; 1,2 evicted
+    expect(reg.maxSeq(rec.id)).toBe(5);
+    expect(reg.minSeq(rec.id)).toBe(3);
+    expect(reg.eventsAfter(rec.id, 0).map((x) => x.seq)).toEqual([3, 4, 5]);
+    // asking after an evicted seq still returns what remains (the caller detects the gap)
+    expect(reg.eventsAfter(rec.id, 2).map((x) => x.seq)).toEqual([3, 4, 5]);
+  });
+
+  it("minSeq/maxSeq are 0 before any event is appended", () => {
+    const reg = new RunRegistry();
+    const rec = reg.create("a", "t");
+    expect(reg.minSeq(rec.id)).toBe(0);
+    expect(reg.maxSeq(rec.id)).toBe(0);
+    expect(reg.eventsAfter(rec.id, 0)).toEqual([]);
   });
 
   it("unsubscribe stops further notifications", () => {

@@ -107,14 +107,14 @@ export function createGatewayServer(
         // GET /runs/:id/events  → SSE
         if (req.method === "GET" && parts.length === 3 && parts[2] === "events") {
           res.writeHead(200, SSE_HEADERS);
-          record.events.forEach((e, i) => res.write(formatSse(e, i))); // replay buffered
+          for (const { seq, event } of record.events) res.write(formatSse(event, seq)); // replay buffered
           if (record.status !== "running") return void res.end();
 
           const heartbeat = setInterval(() => res.write(formatSse({ type: "heartbeat" })), heartbeatMs);
           const cleanup = () => { clearInterval(heartbeat); unsub(); };
-          const unsub = registry.subscribe(record.id, (e, i) => {
+          const unsub = registry.subscribe(record.id, (e, seq) => {
             try {
-              res.write(formatSse(e, i));
+              res.write(formatSse(e, seq));
               if (e.type === "final" || e.type === "error") { cleanup(); res.end(); }
             } catch { cleanup(); res.end(); } // socket gone → always release the interval/sub
           });
