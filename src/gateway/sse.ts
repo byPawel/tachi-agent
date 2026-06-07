@@ -7,10 +7,17 @@ export const SSE_HEADERS = {
   Connection: "keep-alive",
 } as const;
 
-/** Format one SSE frame. `id` (the event index) enables Last-Event-ID replay. */
-export function formatSse(event: GatewayEvent, id?: number): string {
+/**
+ * Format one SSE frame.
+ *
+ * `seq` is the registry's durable, monotonic per-run sequence number (NOT an
+ * array index) — it is emitted as the SSE `id:` so a reconnecting client can
+ * resume with `Last-Event-ID: <seq>`. Heartbeats pass no `seq` and therefore
+ * carry no `id:`, so they never advance the client's resume point.
+ */
+export function formatSse(event: GatewayEvent, seq?: number): string {
   const lines: string[] = [];
-  if (id !== undefined) lines.push(`id: ${id}`);
+  if (seq !== undefined) lines.push(`id: ${seq}`);
   lines.push(`event: ${event.type}`);
   lines.push(`data: ${JSON.stringify(event)}`);
   return lines.join("\n") + "\n\n";
