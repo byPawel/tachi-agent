@@ -60,10 +60,11 @@ export async function runSwarm(
   if (answered.length < minQuorum) {
     warnings.push(`quorum: only ${answered.length}/${roles.length} member(s) produced an answer (min ${minQuorum}).`);
   }
-  for (const role of roles.filter((r) => r.critical)) {
-    const m = members.find((x) => x.role === role.name);
-    if (!m || m.answer.trim() === "") warnings.push(`critical role "${role.name}" produced no answer.`);
-  }
+  roles.forEach((role, i) => {
+    if (role.critical && members[i].answer.trim() === "") {
+      warnings.push(`critical role "${role.name}" produced no answer.`);
+    }
+  });
 
   const prompt = buildSynthesisPrompt(task, members);
   const synth = await deps.makeAgent(SYNTHESIZER_ROLE).run(prompt, { signal: opts.signal });

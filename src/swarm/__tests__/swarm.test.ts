@@ -59,7 +59,20 @@ describe("runSwarm", () => {
           };
     const out = await runSwarm("t", roles, { makeAgent }, { concurrency: 2 });
     expect(peak).toBeLessThanOrEqual(2);
+    expect(peak).toBeGreaterThanOrEqual(2);
     expect(out.members.map((m) => m.role)).toEqual(["a", "b", "c", "d"]); // order preserved despite pooling
+  });
+
+  it("calls onMember once per settled member, including failures", async () => {
+    const roles: SwarmRole[] = [{ name: "ok", systemPrompt: "" }, { name: "bad", systemPrompt: "" }];
+    const makeAgent = (role: SwarmRole): SwarmAgent => {
+      if (role.name === SYNTHESIZER_ROLE.name) return fakeAgent("SYNTH");
+      if (role.name === "bad") return { run: async () => { throw new Error("boom"); } };
+      return fakeAgent("ok");
+    };
+    const seen: string[] = [];
+    await runSwarm("t", roles, { makeAgent }, { onMember: (m) => seen.push(m.role) });
+    expect(seen.sort()).toEqual(["bad", "ok"]);
   });
 
   it("warns (does not throw) below quorum and when a critical role is empty", async () => {
