@@ -134,8 +134,8 @@ node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
             <tbody>
               <tr><td><code>OLLAMA_BASE_URL</code></td><td>Ollama endpoint for the local brain (defaults to <code>127.0.0.1</code>).</td></tr>
               <tr><td><code>OLLAMA_MODEL</code></td><td>Local model id, e.g. <code>qwen2.5</code>.</td></tr>
-              <tr><td><code>TACHIBOT_CMD</code></td><td>Command to launch the tachibot MCP server (council tools).</td></tr>
-              <tr><td><code>DOKORO_CMD</code></td><td>Command to launch the dokoro MCP server (memory). Optional.</td></tr>
+              <tr><td><code>TACHIBOT_CMD</code></td><td>Command to launch the <a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a> MCP server (council tools).</td></tr>
+              <tr><td><code>DOKORO_CMD</code></td><td>Command to launch the <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a> MCP server (memory). Optional.</td></tr>
               <tr><td><code>TACHI_ALLOW</code></td><td>Tool allowlist — restricts which namespaced tools the agent may call.</td></tr>
               <tr><td><code>TACHI_SWARM_ROLES</code></td><td>Comma-separated roles for the swarm; <code>name</code> or <code>name:driver</code>; empty = defaults.</td></tr>
               <tr><td><code>GATEWAY_TOKEN</code> / <code>GATEWAY_PORT</code></td><td>Bearer token and port for the HTTP/SSE gateway.</td></tr>
@@ -185,7 +185,7 @@ registerDriver(<span class="s">"hermes"</span>, () =&gt; <span class="k">new</sp
   <!-- ===================== FOOTER ===================== -->
   <footer class="footer">
     <div class="wrap footer-inner">
-      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP</div>
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP · <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a> · <a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a></div>
       <div class="footer-links">
         <a href="index.html">Home</a>
         <a href="architecture.html">Architecture</a>

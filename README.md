@@ -8,6 +8,8 @@ reasoning runs entirely offline with no external API costs.
 The agent loop lives in the **client**, never inside an MCP server — keeping the
 hub small, embeddable, and free of nested-loop coupling.
 
+📖 **Docs:** **[bypawel.github.io/tachi-agent](https://bypawel.github.io/tachi-agent/)** · built on [dokoro](https://github.com/byPawel/dokoro) (memory) + [tachibot](https://tachibot.com) (council).
+
 ## Architecture
 
 ```mermaid
