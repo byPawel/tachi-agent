@@ -85,12 +85,18 @@ export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentR
     ? new DokoroMemory(host, { aiModel: driver.name })
     : undefined;
 
+  // TACHI_FORCE_SEARCH=1 → every run grounds via grok/perplexity before answering,
+  // regardless of phrasing. Applied as a factory default so EVERY front-end (cli,
+  // repl, slack, telegram, gateway, daemon, run_agent) inherits it; explicit
+  // per-call options still override.
+  const forceGrounding = /^(1|true|yes|on)$/i.test(process.env.TACHI_FORCE_SEARCH ?? "");
+
   return {
     host,
     driver,
     memory,
     toolCount: host.tools().length,
-    orchestrator: (options) => new Orchestrator(driver, host, memory, options),
+    orchestrator: (options) => new Orchestrator(driver, host, memory, { forceGrounding, ...options }),
     close: () => host.close(),
   };
 }

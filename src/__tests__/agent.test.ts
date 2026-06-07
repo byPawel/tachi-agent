@@ -141,3 +141,38 @@ describe("Orchestrator cost tracking", () => {
     expect(res.answer).toBe("best-effort answer despite timeout");
   });
 });
+
+describe("Orchestrator forceGrounding option", () => {
+  const SEARCH_TOOLS: AgentTool[] = [
+    {
+      name: "tachibot_grok_search",
+      description: "grounding search",
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+    },
+  ];
+  const searchHost = (call = vi.fn(async () => "SEARCH RESULTS")): ToolHost => ({ tools: () => SEARCH_TOOLS, call });
+  // A task the deterministic router does NOT classify as needing a search
+  // (no URL, no "what/who is", no "search for/look up/tell me about").
+  const PLAIN_TASK = "best hermes agent skills";
+
+  it("does NOT search a non-entity task by default (router decides — preserves existing behavior)", async () => {
+    const call = vi.fn(async () => "SEARCH RESULTS");
+    const driver = scriptDriver([{ content: "answered from local knowledge", toolCalls: [] }]);
+    const res = await new Orchestrator(driver, searchHost(call), undefined).run(PLAIN_TASK);
+    expect(call).not.toHaveBeenCalled();
+    expect(res.toolCalls).toEqual([]);
+  });
+
+  it("force-calls the grounding search for ANY task when forceGrounding is set", async () => {
+    const call = vi.fn(async () => "SEARCH RESULTS");
+    const driver = scriptDriver([{ content: "grounded answer", toolCalls: [] }]);
+    const res = await new Orchestrator(driver, searchHost(call), undefined, { forceGrounding: true }).run(PLAIN_TASK);
+    expect(call).toHaveBeenCalledWith("tachibot_grok_search", { query: PLAIN_TASK }, undefined);
+    expect(res.toolCalls[0]).toMatchObject({
+      name: "tachibot_grok_search",
+      args: { query: PLAIN_TASK },
+      result: "SEARCH RESULTS",
+    });
+    expect(res.answer).toBe("grounded answer");
+  });
+});

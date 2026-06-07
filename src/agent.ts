@@ -71,7 +71,7 @@ export class Orchestrator {
     // 1b. ROUTER (deterministic) — force a grounding SEARCH for entity/URL questions
     // so the model can't describe a named entity from (hallucinated) priors.
     let grounding = "";
-    if (needsGroundingSearch(task)) {
+    if (this.opts.forceGrounding || needsGroundingSearch(task)) {
       const searchTool = tools.find((t) => /grok_search$|perplexity_ask$/.test(t.name));
       if (searchTool) {
         const result = await safe(() => this.host.call(searchTool.name, { query: task }, this.opts.signal), "");

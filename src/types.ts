@@ -104,6 +104,13 @@ export interface OrchestratorOptions {
    * existing callers (a small local model degrades with extra per-step tool calls).
    */
   memoryInLoop?: boolean;
+  /**
+   * Force a grounding search before reasoning on EVERY task, bypassing the
+   * deterministic router's phrase heuristic (needsGroundingSearch). Guarantees an
+   * external grok/perplexity call so a weak local model can't just answer from its
+   * priors. Off by default; the run-from-env path enables it via TACHI_FORCE_SEARCH.
+   */
+  forceGrounding?: boolean;
 }
 
 export interface RunResult {
