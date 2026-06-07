@@ -680,6 +680,11 @@ td strong { color: var(--accent); }
   border: 1px solid var(--line);
   padding: 28px;
   overflow-x: auto;
+  /* faint vermilion blueprint grid under the artwork */
+  background-image:
+    linear-gradient(rgba(228, 87, 46, .035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(228, 87, 46, .035) 1px, transparent 1px);
+  background-size: 36px 36px, 36px 36px;
 }
 .diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
 
@@ -695,6 +700,126 @@ td strong { color: var(--accent); }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .55; }
+}
+
+/* ----------------------------------------------------------------------------
+   "nice graphs" — refined diagram primitives (scoped .diagram-*)
+   ---------------------------------------------------------------------------- */
+
+/* node depth + finish */
+.diagram-svg .d-node {
+  fill: var(--bg-elev);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.diagram-svg .d-node-accent {
+  fill: rgba(228, 87, 46, .10);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.diagram-svg .d-node-gold {
+  fill: rgba(242, 193, 78, .08);
+  stroke: var(--gold);
+  stroke-width: 1.5;
+}
+/* small mono chips (front-ends) */
+.diagram-svg .d-chip {
+  fill: var(--bg);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+/* typography inside diagrams */
+.diagram-svg .d-title { fill: var(--ink); font-family: var(--font-mono); font-weight: 700; }
+.diagram-svg .d-text  { fill: var(--ink); font-family: var(--font-mono); }
+.diagram-svg .d-mono  { fill: var(--muted); font-family: var(--font-mono); }
+.diagram-svg .d-accent { fill: var(--accent); font-family: var(--font-mono); }
+.diagram-svg .d-gold  { fill: var(--gold); font-family: var(--font-mono); }
+
+/* edges */
+.diagram-svg .d-edge { stroke: var(--line-strong); fill: none; }
+.diagram-svg .d-edge-accent { stroke: var(--accent); fill: none; }
+.diagram-svg .d-edge-gold { stroke: var(--gold); fill: none; }
+.diagram-svg .d-edge-dim { stroke: rgba(236, 231, 222, .22); fill: none; }
+
+/* panel framing for side-by-side compare */
+.diagram-svg .d-panel {
+  fill: rgba(255, 255, 255, .015);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.diagram-svg .d-panel-accent {
+  fill: rgba(228, 87, 46, .04);
+  stroke: rgba(228, 87, 46, .45);
+  stroke-width: 1;
+}
+
+/* gentle pulse on a key node (uses existing .pulse keyframes) */
+.diagram-svg .d-pulse {
+  animation: pulse 2.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* halo behind the key node */
+.diagram-svg .d-halo {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* draw-on-scroll: edges/strokes start hidden, draw in when section reveals.
+   Hooks the EXISTING IntersectionObserver — it adds `.in` to the parent
+   `.reveal`, which is the trigger here. No competing observer. */
+.diagram-svg .d-draw {
+  stroke-dasharray: var(--d-len, 600);
+  stroke-dashoffset: var(--d-len, 600);
+}
+.reveal.in .diagram-svg .d-draw {
+  animation: dDraw 1.05s var(--ease) forwards;
+  animation-delay: var(--d-delay, 0s);
+}
+@keyframes dDraw { to { stroke-dashoffset: 0; } }
+
+/* nodes/labels fade+rise after their edge draws */
+.diagram-svg .d-fade { opacity: 0; }
+.reveal.in .diagram-svg .d-fade {
+  animation: dFade .55s var(--ease) forwards;
+  animation-delay: var(--d-delay, 0s);
+}
+@keyframes dFade { to { opacity: 1; } }
+
+/* key-node halo wakes up once the diagram is in view */
+.reveal.in .diagram-svg .d-halo {
+  animation: dHalo 2.8s ease-in-out 1.1s infinite;
+}
+@keyframes dHalo {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: .35; transform: scale(1.06); }
+}
+
+/* small caption strip under a diagram */
+.diagram-caption {
+  font-family: var(--font-mono);
+  font-size: .74rem;
+  letter-spacing: .04em;
+  color: var(--muted);
+  text-align: center;
+  margin: 16px 0 0;
+}
+.diagram-caption .hot { color: var(--accent); }
+.diagram-caption .warm { color: var(--gold); }
+
+/* REDUCED MOTION: show the final, fully-drawn state, no animation.
+   (The global reduced-motion rule already kills animation/transition;
+   these reset the initial hidden states so nothing stays invisible.) */
+@media (prefers-reduced-motion: reduce) {
+  .diagram-svg .d-draw { stroke-dashoffset: 0 !important; }
+  .diagram-svg .d-fade { opacity: 1 !important; }
+  .diagram-svg .d-halo { opacity: .22 !important; }
 }
 
 /* ============================================================================

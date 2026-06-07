@@ -55,64 +55,103 @@
         </div>
 
         <div class="diagram">
-          <svg viewBox="0 0 960 640" role="img" aria-labelledby="swarmTitle swarmDesc" width="960" height="640">
+          <svg class="diagram-svg" viewBox="0 0 980 700" role="img" aria-labelledby="swarmTitle swarmDesc" preserveAspectRatio="xMidYMid meet">
             <title id="swarmTitle">tachi-agent swarm topology</title>
-            <desc id="swarmDesc">One task fans out to three parallel role agents — implementer, critic, and researcher — each an independent Orchestrator run. Their labeled answers flow into a single synthesizer agent, which merges them into one final answer and may call tachibot_council or tachibot_jury to adjudicate.</desc>
+            <desc id="swarmDesc">One task with a unique traceId fans out to three parallel role agents — implementer, critic, and researcher — running concurrently behind a small cap, each an independent Orchestrator run that writes its own isolated dokoro session keyed swarm:traceId:role. The three labeled answers converge into a single synthesizer agent, which merges them — calling tachibot_council or tachibot_jury to adjudicate disagreement like a jury — into one final answer that is logged once under swarm:traceId.</desc>
             <defs>
-              <marker id="sArrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+              <marker id="sArrow" markerWidth="9" markerHeight="9" refX="6.5" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 z" fill="#E4572E" />
               </marker>
+              <marker id="sArrowGold" markerWidth="9" markerHeight="9" refX="6.5" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 z" fill="#F2C14E" />
+              </marker>
+              <filter id="sShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#000" flood-opacity="0.45" />
+              </filter>
             </defs>
 
-            <!-- Task -->
-            <rect class="svg-node-accent" x="370" y="24" width="220" height="64" rx="2" stroke-width="2" />
-            <text class="svg-label" x="480" y="52" text-anchor="middle" font-size="15" font-weight="700">one task</text>
-            <text class="svg-label-mono" x="480" y="72" text-anchor="middle" font-size="11">unique traceId</text>
-
-            <!-- fan-out lines -->
-            <line class="svg-edge-accent" x1="440" y1="88" x2="190" y2="184" stroke-width="2" marker-end="url(#sArrow)" />
-            <line class="svg-edge-accent" x1="480" y1="88" x2="480" y2="184" stroke-width="2" marker-end="url(#sArrow)" />
-            <line class="svg-edge-accent" x1="520" y1="88" x2="770" y2="184" stroke-width="2" marker-end="url(#sArrow)" />
-            <text class="svg-label-mono" x="300" y="135" text-anchor="middle" font-size="11" fill="#E4572E">parallel · cap 4</text>
-
-            <!-- Role agents -->
-            <rect class="svg-node" x="50" y="190" width="280" height="110" rx="2" />
-            <text class="svg-label" x="190" y="220" text-anchor="middle" font-size="14" font-weight="700">implementer</text>
-            <text class="svg-label-mono" x="190" y="244" text-anchor="middle" font-size="11">role-lens system prompt</text>
-            <text class="svg-label-mono" x="190" y="262" text-anchor="middle" font-size="11">own driver (optional)</text>
-            <text class="svg-label-mono" x="190" y="284" text-anchor="middle" font-size="10.5" fill="#F2C14E">swarm:&lt;traceId&gt;:implementer</text>
-
-            <rect class="svg-node" x="340" y="190" width="280" height="110" rx="2" />
-            <text class="svg-label" x="480" y="220" text-anchor="middle" font-size="14" font-weight="700">critic</text>
-            <text class="svg-label-mono" x="480" y="244" text-anchor="middle" font-size="11">role-lens system prompt</text>
-            <text class="svg-label-mono" x="480" y="262" text-anchor="middle" font-size="11">may be marked critical</text>
-            <text class="svg-label-mono" x="480" y="284" text-anchor="middle" font-size="10.5" fill="#F2C14E">swarm:&lt;traceId&gt;:critic</text>
-
-            <rect class="svg-node" x="630" y="190" width="280" height="110" rx="2" />
-            <text class="svg-label" x="770" y="220" text-anchor="middle" font-size="14" font-weight="700">researcher</text>
-            <text class="svg-label-mono" x="770" y="244" text-anchor="middle" font-size="11">role-lens system prompt</text>
-            <text class="svg-label-mono" x="770" y="262" text-anchor="middle" font-size="11">independent run</text>
-            <text class="svg-label-mono" x="770" y="284" text-anchor="middle" font-size="10.5" fill="#F2C14E">swarm:&lt;traceId&gt;:researcher</text>
-
-            <!-- fan-in lines -->
-            <line class="svg-edge-accent" x1="190" y1="300" x2="430" y2="396" stroke-width="2" marker-end="url(#sArrow)" />
-            <line class="svg-edge-accent" x1="480" y1="300" x2="480" y2="396" stroke-width="2" marker-end="url(#sArrow)" />
-            <line class="svg-edge-accent" x1="770" y1="300" x2="530" y2="396" stroke-width="2" marker-end="url(#sArrow)" />
-            <text class="svg-label-mono" x="660" y="350" text-anchor="middle" font-size="11" fill="#E4572E">labeled answers</text>
-
-            <!-- Synthesizer (pulsing) -->
-            <g class="pulse">
-              <rect class="svg-node-accent" x="330" y="402" width="300" height="96" rx="2" stroke-width="2.5" />
+            <!-- ============ TASK ============ -->
+            <g class="d-fade" style="--d-delay:.05s">
+              <text class="d-mono" x="390" y="34" font-size="11" letter-spacing=".08em">// one task in</text>
+              <rect class="d-node-accent" x="380" y="44" width="220" height="64" rx="4" filter="url(#sShadow)" />
+              <text class="d-title" x="490" y="74" text-anchor="middle" font-size="15">one task</text>
+              <text class="d-mono" x="490" y="94" text-anchor="middle" font-size="10.5">unique traceId</text>
             </g>
-            <text class="svg-label" x="480" y="434" text-anchor="middle" font-size="15" font-weight="700">synthesizer</text>
-            <text class="svg-label-mono" x="480" y="458" text-anchor="middle" font-size="11">merges labeled answers</text>
-            <text class="svg-label" x="480" y="480" text-anchor="middle" font-size="12" fill="#F2C14E">tachibot_council / _jury</text>
 
-            <!-- final -->
-            <line class="svg-edge-accent" x1="480" y1="498" x2="480" y2="548" stroke-width="2" marker-end="url(#sArrow)" />
-            <rect class="svg-node" x="370" y="554" width="220" height="58" rx="2" />
-            <text class="svg-label" x="480" y="582" text-anchor="middle" font-size="14" font-weight="700">one answer</text>
-            <text class="svg-label-mono" x="480" y="600" text-anchor="middle" font-size="10.5" fill="#F2C14E">logged once · swarm:&lt;traceId&gt;</text>
+            <!-- fan-out: trunk down, then three diverging lanes (parallel) -->
+            <path class="d-edge-accent d-draw" style="--d-len:50;--d-delay:.35s" d="M490 108 V146" stroke-width="2.5" />
+            <path class="d-edge-accent d-draw" style="--d-len:340;--d-delay:.5s" d="M490 146 C 380 162, 230 168, 195 214" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:90;--d-delay:.62s"  d="M490 146 V214" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:340;--d-delay:.74s" d="M490 146 C 600 162, 750 168, 785 214" stroke-width="2" marker-end="url(#sArrow)" />
+            <g class="d-fade" style="--d-delay:.6s">
+              <rect x="546" y="150" width="186" height="24" rx="3" fill="rgba(228,87,46,.12)" stroke="#E4572E" stroke-width="1" />
+              <text class="d-accent" x="639" y="167" text-anchor="middle" font-size="10.5" font-weight="700">fan out · parallel · cap 4</text>
+            </g>
+
+            <!-- ============ ROLE AGENTS (staggered entry conveys concurrency) ============ -->
+            <!-- implementer -->
+            <g class="d-fade" style="--d-delay:.85s">
+              <rect class="d-node" x="50" y="222" width="290" height="120" rx="3" filter="url(#sShadow)" />
+              <text class="d-mono" x="68" y="244" font-size="9.5" letter-spacing=".06em">▍ member · lane 1</text>
+              <text class="d-title" x="195" y="270" text-anchor="middle" font-size="14">implementer</text>
+              <text class="d-mono" x="195" y="292" text-anchor="middle" font-size="10.5">role-lens system prompt</text>
+              <text class="d-mono" x="195" y="309" text-anchor="middle" font-size="10.5">own driver (optional)</text>
+              <text class="d-gold" x="195" y="330" text-anchor="middle" font-size="10">swarm:&lt;traceId&gt;:implementer</text>
+            </g>
+            <!-- critic -->
+            <g class="d-fade" style="--d-delay:.97s">
+              <rect class="d-node" x="345" y="222" width="290" height="120" rx="3" filter="url(#sShadow)" />
+              <text class="d-mono" x="363" y="244" font-size="9.5" letter-spacing=".06em">▍ member · lane 2</text>
+              <text class="d-title" x="490" y="270" text-anchor="middle" font-size="14">critic</text>
+              <text class="d-mono" x="490" y="292" text-anchor="middle" font-size="10.5">role-lens system prompt</text>
+              <text class="d-mono" x="490" y="309" text-anchor="middle" font-size="10.5">may be marked critical</text>
+              <text class="d-gold" x="490" y="330" text-anchor="middle" font-size="10">swarm:&lt;traceId&gt;:critic</text>
+            </g>
+            <!-- researcher -->
+            <g class="d-fade" style="--d-delay:1.09s">
+              <rect class="d-node" x="640" y="222" width="290" height="120" rx="3" filter="url(#sShadow)" />
+              <text class="d-mono" x="658" y="244" font-size="9.5" letter-spacing=".06em">▍ member · lane 3</text>
+              <text class="d-title" x="785" y="270" text-anchor="middle" font-size="14">researcher</text>
+              <text class="d-mono" x="785" y="292" text-anchor="middle" font-size="10.5">role-lens system prompt</text>
+              <text class="d-mono" x="785" y="309" text-anchor="middle" font-size="10.5">independent run</text>
+              <text class="d-gold" x="785" y="330" text-anchor="middle" font-size="10">swarm:&lt;traceId&gt;:researcher</text>
+            </g>
+
+            <!-- isolation annotation -->
+            <text class="d-mono d-fade" style="--d-delay:1.2s" x="490" y="362" text-anchor="middle" font-size="10" opacity=".85">each member writes its own isolated dokoro session · never reads peers</text>
+
+            <!-- ============ FAN-IN → SYNTHESIZER ============ -->
+            <path class="d-edge-accent d-draw" style="--d-len:200;--d-delay:1.35s" d="M195 342 C 230 410, 360 420, 408 444" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:130;--d-delay:1.42s" d="M490 342 V444" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:200;--d-delay:1.49s" d="M785 342 C 750 410, 620 420, 572 444" stroke-width="2" marker-end="url(#sArrow)" />
+            <g class="d-fade" style="--d-delay:1.5s">
+              <rect x="612" y="392" width="150" height="24" rx="3" fill="rgba(228,87,46,.12)" stroke="#E4572E" stroke-width="1" />
+              <text class="d-accent" x="687" y="409" text-anchor="middle" font-size="10.5" font-weight="700">labeled answers</text>
+            </g>
+
+            <!-- Synthesizer: key node — halo + gentle pulse (matches hub) -->
+            <rect class="d-halo" x="328" y="448" width="324" height="108" rx="6" />
+            <g class="d-pulse">
+              <rect class="d-node-accent" x="338" y="452" width="304" height="100" rx="4" filter="url(#sShadow)" />
+            </g>
+            <g class="d-fade" style="--d-delay:1.6s">
+              <text class="d-title" x="490" y="484" text-anchor="middle" font-size="15">synthesizer</text>
+              <text class="d-mono" x="490" y="506" text-anchor="middle" font-size="10.5">merges labeled answers</text>
+              <text class="d-gold" x="490" y="528" text-anchor="middle" font-size="12" font-weight="700">tachibot_council / _jury</text>
+            </g>
+            <!-- council/jury adjudicate hint -->
+            <g class="d-fade" style="--d-delay:1.72s">
+              <text class="d-mono" x="664" y="470" font-size="9.5" fill="#F2C14E">↩ council / jury</text>
+              <text class="d-mono" x="664" y="485" font-size="9.5" fill="#F2C14E">adjudicate</text>
+            </g>
+
+            <!-- ============ FINAL ANSWER ============ -->
+            <path class="d-edge-accent d-draw" style="--d-len:60;--d-delay:1.85s" d="M490 552 V602" stroke-width="2.5" marker-end="url(#sArrow)" />
+            <g class="d-fade" style="--d-delay:1.95s">
+              <rect class="d-node" x="380" y="606" width="220" height="62" rx="3" filter="url(#sShadow)" />
+              <text class="d-title" x="490" y="634" text-anchor="middle" font-size="14">one answer</text>
+              <text class="d-gold" x="490" y="654" text-anchor="middle" font-size="10">logged once · swarm:&lt;traceId&gt;</text>
+            </g>
           </svg>
         </div>
       </div>
