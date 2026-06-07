@@ -105,6 +105,18 @@ export class GatewayClient {
     return { runId: d.run_id, status: d.status, result: d.result, error: d.error };
   }
 
+  /** Wire-cancel: POST /runs/:id/cancel (the attach-time abort path). Best-effort. */
+  private async wireCancel(runId: string): Promise<void> {
+    try {
+      await this.fetchImpl(`${this.baseUrl}/runs/${encodeURIComponent(runId)}/cancel`, {
+        method: "POST",
+        headers: this.headers(),
+      });
+    } catch {
+      /* best-effort: the stream is already tearing down */
+    }
+  }
+
   /** Cancel a run. DELETE /runs/:id → { status:"aborted" } (cooperative abort). */
   async cancel(runId: string, signal?: AbortSignal): Promise<RunState> {
     const res = await this.fetchImpl(`${this.baseUrl}/runs/${encodeURIComponent(runId)}`, {
@@ -168,6 +180,86 @@ export class GatewayClient {
   }
 
   /**
+   * Attach to a (possibly already-running) run and stream it to completion, resuming
+   * from `lastEventId` via the SSE-native `Last-Event-ID` header. The server replays
+   * buffered events with `seq > lastEventId` then streams live; we verify the ids stay
+   * contiguous (no gap/dup) across the replay→live boundary, throwing on a continuity
+   * break. `signal.abort()` issues a wire-cancel (`POST /runs/:id/cancel`).
+   *
+   * Heartbeats (which carry the run's current max seq, not the next event seq) are
+   * filtered out and do NOT participate in the continuity check.
+   */
+  async attach(
+    runId: string,
+    opts: { lastEventId?: number; onEvent: (event: AgentEvent) => void; signal?: AbortSignal },
+  ): Promise<RunOutcome> {
+    const lastEventId = opts.lastEventId ?? 0;
+    // Map an aborted signal to a wire-cancel (POST /runs/:id/cancel) so the DAEMON
+    // stops the run, not just our local stream. Fire-and-forget; never aborted itself.
+    const onAbort = () => { void this.wireCancel(runId); };
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+    const extra: Record<string, string> = { Accept: "text/event-stream" };
+    if (lastEventId > 0) extra["Last-Event-ID"] = String(lastEventId);
+
+    const res = await this.fetchImpl(`${this.baseUrl}/runs/${encodeURIComponent(runId)}/events`, {
+      headers: this.headers(extra),
+      signal: opts.signal,
+    });
+    if (!res.ok) {
+      opts.signal?.removeEventListener("abort", onAbort);
+      throw await this.httpError(res); // e.g. 409 event history gap
+    }
+    if (!res.body) {
+      opts.signal?.removeEventListener("abort", onAbort);
+      throw new GatewayHttpError(res.status, "gateway returned no SSE body");
+    }
+
+    const parser = new SseFrameParser();
+    const decoder = new TextDecoder();
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    let outcome: RunOutcome | undefined;
+    let expectedNext = lastEventId + 1; // the next data-event seq we expect to see
+
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        const chunk = done ? decoder.decode() : decoder.decode(value, { stream: true });
+        for (const frame of parser.push(chunk)) {
+          if (frame.event === "heartbeat") continue; // heartbeats carry maxSeq, not next-seq
+          const event = JSON.parse(frame.data) as AgentEvent | { type: "error"; message: string };
+          if (event.type === "error") {
+            outcome = { status: "error", error: (event as { message: string }).message };
+            continue;
+          }
+          // Continuity check on data events: ids must be contiguous (no skip), and we
+          // dedupe a replayed event we've already counted (id < expectedNext).
+          if (frame.id !== undefined) {
+            if (frame.id < expectedNext) continue;            // already-seen duplicate → skip
+            if (frame.id > expectedNext) {                     // a hole → events were lost
+              throw new GatewayHttpError(
+                502,
+                `event continuity gap: expected id ${expectedNext}, got ${frame.id}`,
+              );
+            }
+            expectedNext = frame.id + 1;
+          }
+          opts.onEvent(event as AgentEvent);
+          if (event.type === "final") {
+            outcome = { status: "final", answer: (event as { answer: string }).answer };
+          }
+        }
+        if (outcome || done) break;
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      opts.signal?.removeEventListener("abort", onAbort);
+    }
+
+    return outcome ?? { status: "error", error: "stream ended before a final or error event" };
+  }
+
+  /**
    * One-shot delegation: start a run, stream it to completion, return the answer.
    * Throws GatewayHttpError if the run errors. `onEvent` (optional) receives live
    * progress; `signal` cancels both the HTTP start and the SSE stream.
@@ -208,27 +300,35 @@ export class GatewayClient {
 
 /**
  * Remote `UnifiedClient` adapter: a thin handle to a running tachi-agent daemon.
- * `run()` starts a run then streams it to completion over the gateway SSE API,
- * forwarding every `AgentEvent` and returning a `RunResult` shaped identically to
- * the local path. `close()` is a no-op (the daemon owns the runtime lifecycle).
  *
- * NOTE (Task 6): the resume/replay `attach()` path is added on top of this; `run`
- * is then expressed as `startRun` + `attach(runId, { lastEventId: 0 })` so a dropped
- * SSE connection can reconnect with `Last-Event-ID`.
+ * `run()` = `startRun` then `attach(runId, { lastEventId: 0 })` — it streams the run
+ * to completion over the gateway SSE API, forwarding every `AgentEvent` and returning
+ * a `RunResult` shaped identically to the local path. Resuming through `attach` means a
+ * dropped SSE connection can be reconnected with `Last-Event-ID`. `close()` is a no-op
+ * (the daemon owns the runtime lifecycle). `fetchImpl` is injectable for tests.
  */
-export function remoteClient(baseUrl: string, token: string): UnifiedClient {
-  const gw = new GatewayClient({ baseUrl, token });
+export function remoteClient(baseUrl: string, token: string, fetchImpl?: typeof fetch): UnifiedClient {
+  const gw = new GatewayClient({ baseUrl, token, fetchImpl });
   return {
     async run(text, { onEvent, signal }) {
-      const answer = await gw.runAndWait(text, { onEvent, signal });
-      const result: RunResult = {
-        answer,
+      // Capture the final event's haltedBy so the remote RunResult mirrors the local one.
+      let haltedBy: RunResult["haltedBy"] = "final-answer";
+      const wrapped = (e: AgentEvent): void => {
+        if (e.type === "final") haltedBy = e.haltedBy;
+        onEvent(e);
+      };
+      const { runId } = await gw.startRun(text, { signal });
+      const outcome = await gw.attach(runId, { lastEventId: 0, onEvent: wrapped, signal });
+      if (outcome.status === "error") {
+        throw new GatewayHttpError(502, `run failed: ${outcome.error ?? "unknown error"}`);
+      }
+      return {
+        answer: outcome.answer ?? "",
         iterations: 0,
         toolCalls: [],
-        haltedBy: "final-answer",
+        haltedBy,
         costUsd: 0,
       };
-      return result;
     },
     close: async () => {},
   };

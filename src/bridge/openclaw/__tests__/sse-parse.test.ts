@@ -4,10 +4,10 @@ import { SseFrameParser } from "../sse-parse.js";
 import { formatSse } from "../../../gateway/sse.js";
 
 describe("SseFrameParser", () => {
-  it("parses one complete frame produced by formatSse", () => {
+  it("parses one complete frame produced by formatSse, capturing its id (seq)", () => {
     const p = new SseFrameParser();
-    const frames = p.push(formatSse({ type: "step", iteration: 1 }, 0));
-    expect(frames).toEqual([{ event: "step", data: '{"type":"step","iteration":1}' }]);
+    const frames = p.push(formatSse({ type: "step", iteration: 1 }, 5));
+    expect(frames).toEqual([{ event: "step", data: '{"type":"step","iteration":1}', id: 5 }]);
   });
 
   it("parses multiple frames in a single chunk", () => {
@@ -26,7 +26,7 @@ describe("SseFrameParser", () => {
     const cut = Math.floor(whole.length / 2);
     expect(p.push(whole.slice(0, cut))).toEqual([]); // incomplete → nothing yet
     const frames = p.push(whole.slice(cut));
-    expect(frames).toEqual([{ event: "final", data: '{"type":"final","answer":"OK","haltedBy":"final-answer"}' }]);
+    expect(frames).toEqual([{ event: "final", data: '{"type":"final","answer":"OK","haltedBy":"final-answer"}', id: 0 }]);
   });
 
   it("parses a heartbeat frame that carries no id line", () => {

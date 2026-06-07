@@ -1,6 +1,6 @@
 // src/bridge/openclaw/__tests__/client.test.ts
 import { describe, it, expect } from "vitest";
-import { GatewayClient, GatewayHttpError } from "../client.js";
+import { GatewayClient, GatewayHttpError, remoteClient } from "../client.js";
 import { formatSse } from "../../../gateway/sse.js";
 import type { AgentEvent } from "../../../types.js";
 
@@ -117,6 +117,110 @@ describe("GatewayClient.streamEvents", () => {
     const seen: string[] = [];
     await client.streamEvents("rid", (e) => seen.push(e.type));
     expect(seen).toEqual(["final"]); // heartbeat filtered out
+  });
+});
+
+describe("GatewayClient.attach", () => {
+  it("sends Last-Event-ID and forwards replayed-then-live events in order", async () => {
+    let headers: Record<string, string> | undefined;
+    const frames = [
+      formatSse({ type: "step", iteration: 2 }, 2),       // replayed
+      formatSse({ type: "tool-result", name: "t", result: "ok" }, 3), // replayed
+      formatSse({ type: "final", answer: "the answer", haltedBy: "final-answer" }, 4), // live
+    ];
+    const fetchImpl = (async (_u: string, i?: RequestInit) => {
+      headers = i?.headers as Record<string, string>;
+      return sseResponse(frames);
+    }) as unknown as typeof fetch;
+    const client = new GatewayClient({ baseUrl: "http://gw", token: "t", fetchImpl });
+
+    const seen: AgentEvent[] = [];
+    const outcome = await client.attach("rid", { lastEventId: 1, onEvent: (e) => seen.push(e) });
+
+    expect(headers?.["Last-Event-ID"]).toBe("1");
+    expect(seen.map((e) => e.type)).toEqual(["step", "tool-result", "final"]);
+    expect(outcome).toEqual({ status: "final", answer: "the answer", error: undefined });
+  });
+
+  it("omits Last-Event-ID when resuming from id 0", async () => {
+    let headers: Record<string, string> | undefined;
+    const fetchImpl = (async (_u: string, i?: RequestInit) => {
+      headers = i?.headers as Record<string, string>;
+      return sseResponse([formatSse({ type: "final", answer: "x", haltedBy: "final-answer" }, 1)]);
+    }) as unknown as typeof fetch;
+    const client = new GatewayClient({ baseUrl: "http://gw", token: "t", fetchImpl });
+    await client.attach("rid", { lastEventId: 0, onEvent: () => {} });
+    expect(headers?.["Last-Event-ID"]).toBeUndefined();
+  });
+
+  it("throws on a non-contiguous live id (gap/dup → continuity break)", async () => {
+    // Resume from 1, but the first frame is seq 3 (seq 2 missing) → continuity violation.
+    const frames = [
+      formatSse({ type: "step", iteration: 3 }, 3),
+      formatSse({ type: "final", answer: "x", haltedBy: "final-answer" }, 4),
+    ];
+    const fetchImpl = (async () => sseResponse(frames)) as unknown as typeof fetch;
+    const client = new GatewayClient({ baseUrl: "http://gw", token: "t", fetchImpl });
+    await expect(client.attach("rid", { lastEventId: 1, onEvent: () => {} })).rejects.toThrow(/continuity|gap/i);
+  });
+
+  it("aborting the signal issues POST /runs/:id/cancel", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const ac = new AbortController();
+    const fetchImpl = (async (u: string, i?: RequestInit) => {
+      calls.push({ url: u, method: i?.method ?? "GET" });
+      if (u.endsWith("/cancel")) return jsonResponse(202, { run_id: "rid", status: "aborted" });
+      // events stream: a slow stream that never settles until aborted
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const enc = new TextEncoder();
+          controller.enqueue(enc.encode(formatSse({ type: "step", iteration: 1 }, 1)));
+          (i?.signal as AbortSignal | undefined)?.addEventListener("abort", () => {
+            try { controller.close(); } catch { /* already closed */ }
+          });
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    }) as unknown as typeof fetch;
+    const client = new GatewayClient({ baseUrl: "http://gw", token: "t", fetchImpl });
+
+    const p = client.attach("rid", { lastEventId: 0, onEvent: () => { ac.abort(); }, signal: ac.signal });
+    await p.catch(() => {});
+    expect(calls.some((c) => c.url.endsWith("/runs/rid/cancel") && c.method === "POST")).toBe(true);
+  });
+});
+
+describe("remoteClient (UnifiedClient adapter)", () => {
+  it("run() does startRun then attach from id 0 and returns a RunResult", async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (u: string) => {
+      urls.push(u);
+      if (u.endsWith("/runs")) return jsonResponse(202, { run_id: "rid", status: "running" });
+      return sseResponse([
+        formatSse({ type: "step", iteration: 1 }, 1),
+        formatSse({ type: "final", answer: "42", haltedBy: "final-answer" }, 2),
+      ]);
+    }) as unknown as typeof fetch;
+
+    const client = remoteClient("http://gw", "t", fetchImpl);
+    const seen: AgentEvent[] = [];
+    const result = await client.run("what is the answer", { onEvent: (e) => seen.push(e) });
+
+    expect(urls[0]).toBe("http://gw/runs");
+    expect(urls[1]).toBe("http://gw/runs/rid/events");
+    expect(seen.map((e) => e.type)).toEqual(["step", "final"]);
+    expect(result.answer).toBe("42");
+    expect(result.haltedBy).toBe("final-answer");
+    await client.close(); // no-op, must not throw
+  });
+
+  it("run() throws when the run ends in an error event", async () => {
+    const fetchImpl = (async (u: string) => {
+      if (u.endsWith("/runs")) return jsonResponse(202, { run_id: "rid", status: "running" });
+      return sseResponse([formatSse({ type: "error", message: "model down" })]);
+    }) as unknown as typeof fetch;
+    const client = remoteClient("http://gw", "t", fetchImpl);
+    await expect(client.run("x", { onEvent: () => {} })).rejects.toThrow(/model down/);
   });
 });
 

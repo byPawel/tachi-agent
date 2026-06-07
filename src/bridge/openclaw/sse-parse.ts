@@ -14,6 +14,8 @@ export interface SseFrame {
   event: string;
   /** The concatenated `data:` payload (the gateway emits one line of JSON). */
   data: string;
+  /** The `id:` value (the durable seq), if present — drives Last-Event-ID resume. */
+  id?: number;
 }
 
 export class SseFrameParser {
@@ -34,16 +36,20 @@ export class SseFrameParser {
     return frames;
   }
 
-  /** Decode one frame block into `{ event, data }`, or null if it carries no data. */
+  /** Decode one frame block into `{ event, data, id? }`, or null if it carries no data. */
   private decode(block: string): SseFrame | null {
     let event = "message"; // SSE default when no `event:` line is present
+    let id: number | undefined;
     const dataLines: string[] = [];
     for (const line of block.split("\n")) {
       if (line.startsWith("event:")) event = line.slice(6).trim();
       else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
-      // `id:` and any other field are ignored
+      else if (line.startsWith("id:")) {
+        const n = Number(line.slice(3).trim());
+        if (Number.isFinite(n)) id = n;
+      }
     }
     if (dataLines.length === 0) return null;
-    return { event, data: dataLines.join("\n") };
+    return id === undefined ? { event, data: dataLines.join("\n") } : { event, data: dataLines.join("\n"), id };
   }
 }
