@@ -14,6 +14,10 @@ export { registerDriver, getDriver, listDrivers } from "./registry.js";
 export { GatewayClient, GatewayHttpError } from "./bridge/openclaw/index.js";
 export type { GatewayClientConfig, RunOutcome, RunState, StartedRun } from "./bridge/openclaw/index.js";
 import "./drivers/register.js"; // side-effect: register built-in "ollama" + "hermes" drivers
+export { runSwarm, buildSwarmFromEnv, defaultMakeAgent, SYNTHESIZER_ROLE, memberSessionId, swarmTraceSession } from "./swarm/swarm.js";
+export type { RunSwarmOptions } from "./swarm/swarm.js";
+export { parseRoles, DEFAULT_ROLES } from "./swarm/roles.js";
+export type { SwarmRole, SwarmMember, SwarmResult, SwarmAgent, SwarmDeps } from "./swarm/types.js";
 
 import { Orchestrator } from "./agent.js";
 import { getDriver } from "./registry.js";
