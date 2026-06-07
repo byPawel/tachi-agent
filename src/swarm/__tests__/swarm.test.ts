@@ -99,4 +99,47 @@ describe("runSwarm", () => {
     const out = await runSwarm("t", roles, { makeAgent });
     expect(out.warnings).toBeUndefined();
   });
+
+  it("does not warn for a single-role swarm whose only role answers (minQuorum capped to role count)", async () => {
+    const roles: SwarmRole[] = [{ name: "solo", systemPrompt: "" }];
+    const makeAgent = (role: SwarmRole): SwarmAgent =>
+      role.name === SYNTHESIZER_ROLE.name ? fakeAgent("SYNTH") : fakeAgent(role.name);
+    const out = await runSwarm("t", roles, { makeAgent });
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("caps an over-large minQuorum to the number of roles", async () => {
+    const roles: SwarmRole[] = [{ name: "a", systemPrompt: "" }, { name: "b", systemPrompt: "" }];
+    const makeAgent = (role: SwarmRole): SwarmAgent =>
+      role.name === SYNTHESIZER_ROLE.name ? fakeAgent("SYNTH") : fakeAgent(role.name);
+    const out = await runSwarm("t", roles, { makeAgent }, { minQuorum: 5 }); // 5 > 2 roles, both answer → no warning
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("does not start members once the signal is aborted; records the rest as aborted, order preserved", async () => {
+    const roles: SwarmRole[] = ["a", "b", "c"].map((name) => ({ name, systemPrompt: "" }));
+    const started: string[] = [];
+    const makeAgent = (role: SwarmRole): SwarmAgent =>
+      role.name === SYNTHESIZER_ROLE.name
+        ? fakeAgent("SYNTH")
+        : { run: async () => { started.push(role.name); return result(role.name); } };
+    const ac = new AbortController();
+    ac.abort();
+    const out = await runSwarm("t", roles, { makeAgent }, { signal: ac.signal });
+    expect(started).toEqual([]); // no member agent was started after abort
+    expect(out.members.map((m) => m.role)).toEqual(["a", "b", "c"]); // fully populated, order preserved
+    expect(out.members.every((m) => m.haltedBy === "aborted" && m.answer === "")).toBe(true);
+  });
+
+  it("tolerates a synthesizer failure — returns members + a warning instead of throwing", async () => {
+    const roles: SwarmRole[] = [{ name: "a", systemPrompt: "" }, { name: "b", systemPrompt: "" }];
+    const makeAgent = (role: SwarmRole): SwarmAgent =>
+      role.name === SYNTHESIZER_ROLE.name
+        ? { run: async () => { throw new Error("synth boom"); } }
+        : fakeAgent(role.name);
+    const out = await runSwarm("t", roles, { makeAgent });
+    expect(out.answer).toBe("");
+    expect(out.members.map((m) => m.role)).toEqual(["a", "b"]); // member perspectives still returned
+    expect(out.warnings!.join(" ")).toMatch(/synth/i);
+  });
 });

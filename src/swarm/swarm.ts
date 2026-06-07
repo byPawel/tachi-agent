@@ -2,7 +2,8 @@
 import type { SwarmRole, SwarmMember, SwarmResult, SwarmDeps, SwarmAgent } from "./types.js";
 import { buildSynthesisPrompt } from "./synthesis.js";
 import type { ToolHost } from "../types.js";
-import { createOrchestrator, getDriver } from "../index.js";
+import { createOrchestrator } from "../orchestrator.js";
+import { getDriver } from "../registry.js";
 import { buildAgentFromEnv } from "../runtime.js";
 import { DokoroMemory } from "../memory/dokoro.js";
 import { parseRoles } from "./roles.js";
@@ -28,8 +29,10 @@ export interface RunSwarmOptions {
  * Run each role on the SAME task with bounded concurrency, then synthesize.
  * PURE: every LLM-bound path goes through deps.makeAgent (mockable in tests).
  * Failures are tolerated — a member that throws is recorded with an empty answer
- * (haltedBy "aborted") and excluded from synthesis. Quorum shortfalls and missing
- * critical-role answers are reported as non-fatal warnings, never thrown.
+ * (haltedBy "aborted") and excluded from synthesis; a synthesizer that throws yields
+ * an empty answer plus a warning. Quorum shortfalls, missing critical-role answers,
+ * and synthesis failures are reported as non-fatal warnings, never thrown. Once
+ * opts.signal aborts, no further members are started.
  */
 export async function runSwarm(
   task: string,
@@ -47,11 +50,17 @@ export async function runSwarm(
     for (let i = next++; i < roles.length; i = next++) {
       const role = roles[i];
       let m: SwarmMember;
-      try {
-        const r = await deps.makeAgent(role).run(task, { signal: opts.signal });
-        m = { role: role.name, answer: r.answer, haltedBy: r.haltedBy, costUsd: r.costUsd };
-      } catch {
+      if (opts.signal?.aborted) {
+        // Once aborted, start no further members — record the rest as aborted so
+        // `members` stays fully populated (downstream index/quorum checks need it).
         m = { role: role.name, answer: "", haltedBy: "aborted", costUsd: 0 };
+      } else {
+        try {
+          const r = await deps.makeAgent(role).run(task, { signal: opts.signal });
+          m = { role: role.name, answer: r.answer, haltedBy: r.haltedBy, costUsd: r.costUsd };
+        } catch {
+          m = { role: role.name, answer: "", haltedBy: "aborted", costUsd: 0 };
+        }
       }
       members[i] = m;
       opts.onMember?.(m);
@@ -61,7 +70,7 @@ export async function runSwarm(
 
   // Quorum: warn (never throw) on too-few answers or a missing critical-role answer.
   const warnings: string[] = [];
-  const minQuorum = opts.minQuorum ?? 2;
+  const minQuorum = Math.min(opts.minQuorum ?? 2, roles.length);
   const answered = members.filter((m) => m.answer.trim() !== "");
   if (answered.length < minQuorum) {
     warnings.push(`quorum: only ${answered.length}/${roles.length} member(s) produced an answer (min ${minQuorum}).`);
@@ -73,8 +82,15 @@ export async function runSwarm(
   });
 
   const prompt = buildSynthesisPrompt(task, members);
-  const synth = await deps.makeAgent(SYNTHESIZER_ROLE).run(prompt, { signal: opts.signal });
-  return { answer: synth.answer, members, ...(warnings.length ? { warnings } : {}) };
+  let answer = "";
+  try {
+    answer = (await deps.makeAgent(SYNTHESIZER_ROLE).run(prompt, { signal: opts.signal })).answer;
+  } catch (e) {
+    // Synthesis failure is non-fatal — consistent with member tolerance. Surface a
+    // warning and still return the raw member perspectives rather than throwing.
+    warnings.push(`synthesis failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return { answer, members, ...(warnings.length ? { warnings } : {}) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,15 +146,20 @@ export async function buildSwarmFromEnv(
 }> {
   const rt = await buildAgentFromEnv();
   const roles = parseRoles(process.env.TACHI_SWARM_ROLES);
-  const traceId = opts.traceId ?? randomUUID();
-  const makeAgent = defaultMakeAgent(rt.host, rt.driver.name, traceId);
-  const finalMemory = new DokoroMemory(rt.host, { sessionId: swarmTraceSession(traceId), aiModel: rt.driver.name });
+  // Base id for this swarm instance; each .run() derives a UNIQUE child trace so
+  // repeated runs never share member sessions (no cross-run recall). opts.traceId
+  // seeds the base — injectable for deterministic tests.
+  const baseTraceId = opts.traceId ?? randomUUID();
+  let runSeq = 0;
   return {
     roles,
-    traceId,
+    traceId: baseTraceId,
     run: async (task, runOpts) => {
+      const traceId = `${baseTraceId}#${++runSeq}`; // unique per run → isolated sessions
+      const makeAgent = defaultMakeAgent(rt.host, rt.driver.name, traceId);
+      const finalMemory = new DokoroMemory(rt.host, { sessionId: swarmTraceSession(traceId), aiModel: rt.driver.name });
       const out = await runSwarm(task, roles, { makeAgent }, runOpts);
-      await finalMemory.log({ task, result: out.answer }); // once, race-free
+      await finalMemory.log({ task, result: out.answer }); // once per run, race-free
       return out;
     },
     close: () => rt.close(),

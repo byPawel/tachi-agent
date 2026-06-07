@@ -14,25 +14,9 @@ export { registerDriver, getDriver, listDrivers } from "./registry.js";
 export { GatewayClient, GatewayHttpError } from "./bridge/openclaw/index.js";
 export type { GatewayClientConfig, RunOutcome, RunState, StartedRun } from "./bridge/openclaw/index.js";
 import "./drivers/register.js"; // side-effect: register built-in "ollama" + "hermes" drivers
+export { createOrchestrator } from "./orchestrator.js";
+export type { CreateOrchestratorConfig } from "./orchestrator.js";
 export { runSwarm, buildSwarmFromEnv, defaultMakeAgent, SYNTHESIZER_ROLE, memberSessionId, swarmTraceSession } from "./swarm/swarm.js";
 export type { RunSwarmOptions } from "./swarm/swarm.js";
 export { parseRoles, DEFAULT_ROLES } from "./swarm/roles.js";
 export type { SwarmRole, SwarmMember, SwarmResult, SwarmAgent, SwarmDeps } from "./swarm/types.js";
-
-import { Orchestrator } from "./agent.js";
-import { getDriver } from "./registry.js";
-import type { Driver, ToolHost, Memory, OrchestratorOptions } from "./types.js";
-
-export interface CreateOrchestratorConfig {
-  /** A Driver instance, or the name of a registered one. */
-  driver: Driver | string;
-  host: ToolHost;
-  memory?: Memory;
-  options?: OrchestratorOptions;
-}
-
-/** Build an Orchestrator from a Driver instance or a registered driver name. */
-export function createOrchestrator(cfg: CreateOrchestratorConfig): Orchestrator {
-  const driver = typeof cfg.driver === "string" ? getDriver(cfg.driver) : cfg.driver;
-  return new Orchestrator(driver, cfg.host, cfg.memory, cfg.options);
-}

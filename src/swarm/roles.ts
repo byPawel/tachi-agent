@@ -11,7 +11,7 @@ const ROLE_META = new Map(DEFAULT_ROLES.map((r) => [r.name, r]));
 
 /** Parse a comma-separated roles spec ("name" or "name:driver"); empty → DEFAULT_ROLES. */
 export function parseRoles(env: string | undefined): SwarmRole[] {
-  if (!env || env.trim() === "") return DEFAULT_ROLES;
+  if (!env || env.trim() === "") return [...DEFAULT_ROLES];
   const roles: SwarmRole[] = [];
   for (const tok of env.split(",")) {
     const t = tok.trim();
@@ -22,5 +22,5 @@ export function parseRoles(env: string | undefined): SwarmRole[] {
     const systemPrompt = meta?.systemPrompt ?? `You are the ${name.toUpperCase()}. Answer the task through the distinct lens of a "${name}".`;
     roles.push({ name, systemPrompt, ...(meta?.critical ? { critical: true } : {}), ...(driver ? { driver } : {}) });
   }
-  return roles.length > 0 ? roles : DEFAULT_ROLES;
+  return roles.length > 0 ? roles : [...DEFAULT_ROLES];
 }
