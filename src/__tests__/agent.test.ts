@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Orchestrator } from "../agent.js";
+import { estimateCost } from "../cost.js";
 import type { Driver, ToolHost, Memory, AgentTool, DriverResult } from "../types.js";
 
 const TOOLS: AgentTool[] = [
@@ -34,14 +35,15 @@ describe("Orchestrator (the pluggable core)", () => {
 
     const res = await new Orchestrator(driver, fakeHost(call), memory).run("should we ship?");
 
-    expect(recall).toHaveBeenCalledWith("should we ship?");
-    expect(call).toHaveBeenCalledWith("tachibot_jury", { question: "ship?" });
+    // 3rd arg is the optional abort signal (undefined here — no signal was passed to run()).
+    expect(recall).toHaveBeenCalledWith("should we ship?", undefined);
+    expect(call).toHaveBeenCalledWith("tachibot_jury", { question: "ship?" }, undefined);
     expect(res.answer).toBe("Final: ship it.");
     expect(res.haltedBy).toBe("final-answer");
     expect(res.toolCalls).toEqual([
       { name: "tachibot_jury", args: { question: "ship?" }, result: "jury verdict: ship it" },
     ]);
-    expect(log).toHaveBeenCalledWith({ task: "should we ship?", result: "Final: ship it." });
+    expect(log).toHaveBeenCalledWith({ task: "should we ship?", result: "Final: ship it." }, undefined);
   });
 
   it("HALTs at maxIterations when the driver never stops calling tools", async () => {
@@ -68,5 +70,74 @@ describe("Orchestrator (the pluggable core)", () => {
     const res = await new Orchestrator(driver, fakeHost(), undefined).run("hi");
     expect(res.answer).toBe("direct answer");
     expect(res.haltedBy).toBe("final-answer");
+  });
+
+  it("forwards the run's abort signal to host.call (abort-forwarding is reachable, not dead code)", async () => {
+    const ac = new AbortController();
+    const call = vi.fn(async (_n: string, _a: unknown, signal?: AbortSignal) => {
+      expect(signal).toBe(ac.signal);
+      return "ok";
+    });
+    const driver = scriptDriver([
+      { content: "", toolCalls: [{ name: "tachibot_jury", arguments: {} }] },
+      { content: "done", toolCalls: [] },
+    ]);
+    await new Orchestrator(driver, fakeHost(call), undefined, { signal: ac.signal }).run("go");
+    expect(call).toHaveBeenCalledWith("tachibot_jury", {}, ac.signal);
+  });
+
+  it("forwards the run's abort signal to memory recall + log", async () => {
+    const ac = new AbortController();
+    const recall = vi.fn(async (_t: string, signal?: AbortSignal) => {
+      expect(signal).toBe(ac.signal);
+      return "";
+    });
+    const log = vi.fn(async (_e: unknown, signal?: AbortSignal) => {
+      expect(signal).toBe(ac.signal);
+    });
+    const memory: Memory = { recall, log };
+    const driver = scriptDriver([{ content: "answer", toolCalls: [] }]);
+    await new Orchestrator(driver, fakeHost(), memory, { signal: ac.signal }).run("go");
+    expect(recall).toHaveBeenCalledWith("go", ac.signal);
+    expect(log).toHaveBeenCalledWith({ task: "go", result: "answer" }, ac.signal);
+  });
+});
+
+describe("Orchestrator cost tracking", () => {
+  it("reports a non-zero costUsd after a jury call, matching estimateCost", async () => {
+    const driver = scriptDriver([
+      { content: "", toolCalls: [{ name: "tachibot_jury", arguments: {} }] },
+      { content: "done", toolCalls: [] },
+    ]);
+    const res = await new Orchestrator(driver, fakeHost(), undefined).run("go");
+    expect(res.costUsd).toBe(estimateCost(res.toolCalls));
+    expect(res.costUsd).toBeGreaterThan(0);
+  });
+
+  it("emits a cost event before final", async () => {
+    const events: string[] = [];
+    const driver = scriptDriver([
+      { content: "", toolCalls: [{ name: "tachibot_jury", arguments: {} }] },
+      { content: "done", toolCalls: [] },
+    ]);
+    await new Orchestrator(driver, fakeHost(), undefined, {
+      onEvent: (e) => events.push(e.type),
+    }).run("go");
+    expect(events).toContain("cost");
+    expect(events.indexOf("cost")).toBeLessThan(events.indexOf("final"));
+  });
+
+  it("degrades gracefully when a tool throws (e.g. timeout) — still answers", async () => {
+    const call = vi.fn(async () => {
+      throw new Error('Tool "tachibot_jury" timed out after 120000ms');
+    });
+    const host: ToolHost = { tools: () => TOOLS, call };
+    const driver = scriptDriver([
+      { content: "", toolCalls: [{ name: "tachibot_jury", arguments: {} }] },
+      { content: "best-effort answer despite timeout", toolCalls: [] },
+    ]);
+    const res = await new Orchestrator(driver, host, undefined).run("go");
+    expect(res.toolCalls[0].result).toMatch(/timed out/);
+    expect(res.answer).toBe("best-effort answer despite timeout");
   });
 });

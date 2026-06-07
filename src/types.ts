@@ -54,8 +54,9 @@ export interface Driver {
 export interface ToolHost {
   /** All available tools across every connected server, namespaced. */
   tools(): AgentTool[];
-  /** Dispatch a namespaced tool call; returns the tool's text result. */
-  call(name: string, args: Record<string, unknown>): Promise<string>;
+  /** Dispatch a namespaced tool call; returns the tool's text result.
+   *  `signal` (optional) aborts an in-flight call — the host also enforces its own timeout. */
+  call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string>;
 }
 
 /**
@@ -64,8 +65,8 @@ export interface ToolHost {
  * and testable, and so memory can be disabled or swapped independently.
  */
 export interface Memory {
-  recall(task: string): Promise<string>;
-  log(entry: { task: string; result: string }): Promise<void>;
+  recall(task: string, signal?: AbortSignal): Promise<string>;
+  log(entry: { task: string; result: string }, signal?: AbortSignal): Promise<void>;
 }
 
 /**
@@ -76,12 +77,13 @@ export type AgentEvent =
   | { type: "step"; iteration: number }
   | { type: "assistant"; content: string; toolCalls: ToolCall[] }
   | { type: "tool-result"; name: string; result: string }
+  | { type: "cost"; usd: number; calls: number }
   | { type: "final"; answer: string; haltedBy: RunResult["haltedBy"] };
 
 export interface OrchestratorOptions {
   /** Hard stop on the ReAct loop. Default 10. */
   maxIterations?: number;
-  /** Wall-clock budget for the whole run (ms). Default 120_000. Local = free, so time is the only budget. */
+  /** Wall-clock budget for the whole run (ms). Default 120_000. Cloud tools cost money — see RunResult.costUsd. */
   timeoutMs?: number;
   /** Extra system-prompt guidance prepended to the agent's instructions. */
   systemPrompt?: string;
@@ -96,4 +98,6 @@ export interface RunResult {
   iterations: number;
   toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }>;
   haltedBy: "final-answer" | "max-iterations" | "timeout" | "aborted";
+  /** Rough estimated USD spent on cloud tool calls this run (0 for purely local/memory tools). */
+  costUsd: number;
 }

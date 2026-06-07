@@ -6,15 +6,34 @@ export type RunStatus = "running" | "done" | "error" | "aborted";
 export type GatewayEvent =
   | AgentEvent
   | { type: "error"; message: string }
-  | { type: "heartbeat" };
+  | { type: "heartbeat" }
+  | { type: "shutdown"; reason: string };
+
+/** One buffered event tagged with its durable, monotonic per-run sequence number. */
+export interface SeqEvent {
+  /** Monotonic per-run sequence (1-based, never reused). Becomes the SSE `id:`. */
+  seq: number;
+  event: GatewayEvent;
+}
 
 export interface RunRecord {
   id: string;
   tenant: string;
   task: string;
   status: RunStatus;
-  /** Append-only event log; the SSE `id:` is the array index (enables replay). */
-  events: GatewayEvent[];
+  /**
+   * Bounded ring buffer of the most-recent events, each tagged with a durable
+   * monotonic `seq` (the SSE `id:`). Older entries are evicted past the cap;
+   * `eventsAfter`/`minSeq` on the registry drive Last-Event-ID replay.
+   */
+  events: SeqEvent[];
+  /** Next seq to assign (so seq survives ring eviction). Starts at 0; first event is 1. */
+  nextSeq: number;
+  /**
+   * Epoch ms of the last activity (create, event append, or subscriber connect/close).
+   * Drives TTL/GC: a finished, unattached run idle past the TTL is collectable.
+   */
+  lastActivity: number;
   result?: RunResult;
   error?: string;
   controller: AbortController;

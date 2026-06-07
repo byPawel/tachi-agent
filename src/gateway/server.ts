@@ -2,6 +2,7 @@
 import http from "node:http";
 import type { AgentRuntime } from "../runtime.js";
 import type { AgentEvent } from "../types.js";
+import type { GatewayEvent } from "./types.js";
 import { RunRegistry } from "./registry.js";
 import { parseBearer, resolveTenant } from "./auth.js";
 import { formatSse, SSE_HEADERS } from "./sse.js";
@@ -18,8 +19,34 @@ export interface GatewayOptions {
   heartbeatMs?: number;
   /** Max concurrent running runs per tenant before 429. Default 16. */
   maxConcurrentPerTenant?: number;
+  /** Per-run event ring-buffer cap (Last-Event-ID replay depth). Default TACHI_SESSION_BUFFER_MAX ?? 10000. */
+  sessionBufferMax?: number;
+  /** Injectable clock (ms) for deterministic TTL/GC tests. Defaults to Date.now. */
+  now?: () => number;
+  /**
+   * Optional drain control surface (used by the daemon). When `draining` is true,
+   * new `POST /runs` are rejected with 503; the daemon broadcasts a final shutdown
+   * frame to every live SSE sink tracked in `sinks` before exiting. The gateway also
+   * populates `controls.collect` so the daemon's GC timer can sweep the run registry.
+   */
+  controls?: GatewayControls;
   /** Token config source. Defaults to process.env. */
   env?: { GATEWAY_TOKENS?: string; GATEWAY_TOKEN?: string };
+}
+
+/** Mutable drain control surface shared between the gateway and its owner (the daemon). */
+export interface GatewayControls {
+  /** When true, the gateway rejects new runs with 503 (drain mode). */
+  draining: boolean;
+  /** Every currently-open SSE response (a live event sink). */
+  sinks: Set<http.ServerResponse>;
+  /**
+   * TTL/GC sweep over the gateway's run registry — evicts unattached, finished runs
+   * idle past `ttlMs`, returning the evicted ids. The gateway populates this so the
+   * daemon's periodic timer can reclaim ring-buffer memory. No-op until the server is
+   * created.
+   */
+  collect?: (ttlMs: number) => string[];
 }
 
 class HttpError extends Error {
@@ -49,11 +76,14 @@ export function createGatewayServer(
   runtime: Pick<AgentRuntime, "orchestrator">,
   opts: GatewayOptions = {},
 ): http.Server {
-  const registry = new RunRegistry();
+  const registry = new RunRegistry({ bufferMax: opts.sessionBufferMax, now: opts.now });
   const env = opts.env ?? process.env;
   const heartbeatMs = opts.heartbeatMs ?? 15000;
   const maxConcurrent = opts.maxConcurrentPerTenant ?? 16;
   const iterationCeiling = opts.maxIterations ?? 50;
+  const controls = opts.controls;
+  // Expose the registry's TTL/GC sweep to the daemon (drives periodic memory reclaim).
+  if (controls) controls.collect = (ttlMs: number) => registry.collect(ttlMs);
 
   return http.createServer(async (req, res) => {
     try {
@@ -65,6 +95,7 @@ export function createGatewayServer(
 
       // POST /runs
       if (req.method === "POST" && parts.length === 1 && parts[0] === "runs") {
+        if (controls?.draining) { req.resume(); return json(res, 503, { error: "server draining" }); } // reject new work (drain the body so the socket frees)
         if (Number(req.headers["content-length"] ?? 0) > MAX_BODY_BYTES) {
           return json(res, 413, { error: "request body too large" });
         }
@@ -104,21 +135,73 @@ export function createGatewayServer(
         const record = registry.get(parts[1]);
         if (!record || record.tenant !== tenant.tenant) return json(res, 404, { error: "not found" });
 
-        // GET /runs/:id/events  → SSE
+        // GET /runs/:id/events  → SSE (with Last-Event-ID resume + gap detection)
         if (req.method === "GET" && parts.length === 3 && parts[2] === "events") {
-          res.writeHead(200, SSE_HEADERS);
-          record.events.forEach((e, i) => res.write(formatSse(e, i))); // replay buffered
-          if (record.status !== "running") return void res.end();
+          // Resume point: `Last-Event-ID` header (SSE-native) or `?lastEventId=` fallback.
+          const rawLast = (req.headers["last-event-id"] as string | undefined) ?? url.searchParams.get("lastEventId") ?? "";
+          const lastEventId = Number.isFinite(Number(rawLast)) && rawLast !== "" ? Math.max(0, Math.floor(Number(rawLast))) : 0;
 
-          const heartbeat = setInterval(() => res.write(formatSse({ type: "heartbeat" })), heartbeatMs);
-          const cleanup = () => { clearInterval(heartbeat); unsub(); };
-          const unsub = registry.subscribe(record.id, (e, i) => {
+          // Gap: the next event the client needs (lastEventId+1) was already evicted
+          // from the ring (minSeq>0 means some event is buffered). 409 so the client
+          // can fall back to a fresh stream / poll instead of silently skipping events.
+          const minSeq = registry.minSeq(record.id);
+          if (lastEventId > 0 && minSeq > 0 && minSeq > lastEventId + 1) {
+            return json(res, 409, { error: "event history gap", min_available: minSeq });
+          }
+
+          res.writeHead(200, SSE_HEADERS);
+          registry.incRef(record.id); // a live SSE sink — refcount guards GC + drain
+          controls?.sinks.add(res);   // track for drain-time shutdown broadcast
+
+          // Subscribe-then-replay (no await between) so an append during replay can't
+          // be dropped or duplicated: live events arriving before we go live are queued,
+          // then flushed by seq once, deduped against what replay already wrote.
+          let live = false;
+          let closed = false;
+          let lastWritten = lastEventId;
+          const pending: Array<{ event: GatewayEvent; seq: number }> = [];
+          const write = (e: GatewayEvent, seq: number): boolean => {
             try {
-              res.write(formatSse(e, i));
-              if (e.type === "final" || e.type === "error") { cleanup(); res.end(); }
-            } catch { cleanup(); res.end(); } // socket gone → always release the interval/sub
+              res.write(formatSse(e, seq));
+              lastWritten = seq;
+              if (e.type === "final" || e.type === "error") { cleanup(); res.end(); return false; }
+              return true;
+            } catch { cleanup(); res.end(); return false; }
+          };
+
+          // Heartbeats carry the run's current max seq as the SSE id: so an idle client
+          // keeps its resume cursor fresh (reconnect asks for `> seq` correctly).
+          const heartbeat = setInterval(() => {
+            try {
+              const cur = registry.maxSeq(record.id);
+              res.write(cur > 0 ? formatSse({ type: "heartbeat" }, cur) : formatSse({ type: "heartbeat" }));
+            } catch { cleanup(); res.end(); }
+          }, heartbeatMs);
+          const cleanup = () => {
+            if (closed) return; // idempotent: req close + final can both fire
+            closed = true;
+            clearInterval(heartbeat);
+            unsub();
+            registry.decRef(record.id);
+            controls?.sinks.delete(res);
+          };
+          const unsub = registry.subscribe(record.id, (e, seq) => {
+            if (!live) { pending.push({ event: e, seq }); return; }
+            write(e, seq);
           });
           req.on("close", cleanup);
+
+          // Replay buffered events strictly after the resume point, in seq order.
+          for (const { seq, event } of registry.eventsAfter(record.id, lastEventId)) {
+            if (!write(event, seq)) return; // settled mid-replay → done
+          }
+          // Flush anything that arrived during replay (seq beyond what we just wrote), then go live.
+          for (const p of pending) if (p.seq > lastWritten) { if (!write(p.event, p.seq)) return; }
+          live = true;
+
+          // A run that already finished (and emitted no live tail) gets its buffered
+          // replay above; close the stream now since no more events will come.
+          if (record.status !== "running") { cleanup(); return void res.end(); }
           return;
         }
 
@@ -129,6 +212,12 @@ export function createGatewayServer(
 
         // DELETE /runs/:id  → cancel
         if (req.method === "DELETE" && parts.length === 2) {
+          registry.abort(record.id);
+          return json(res, 202, { run_id: record.id, status: "aborted" });
+        }
+
+        // POST /runs/:id/cancel  → wire-cancel (the client maps an aborted signal here)
+        if (req.method === "POST" && parts.length === 3 && parts[2] === "cancel") {
           registry.abort(record.id);
           return json(res, 202, { run_id: record.id, status: "aborted" });
         }

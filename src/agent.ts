@@ -15,6 +15,7 @@ import type {
   RunResult, OrchestratorOptions,
 } from "./types.js";
 import { needsGroundingSearch } from "./router.js";
+import { estimateCost } from "./cost.js";
 
 const BASE_SYSTEM = `You are TachiAgent, a local-first orchestration agent driving a ReAct loop.
 Your tools come from two sources:
@@ -65,7 +66,7 @@ export class Orchestrator {
     const toolCalls: RunResult["toolCalls"] = [];
 
     // 1. RECALL — pull relevant prior context from dokoro before reasoning.
-    const recalled = this.memory ? await safe(() => this.memory!.recall(task), "") : "";
+    const recalled = this.memory ? await safe(() => this.memory!.recall(task, this.opts.signal), "") : "";
 
     // 1b. ROUTER (deterministic) — force a grounding SEARCH for entity/URL questions
     // so the model can't describe a named entity from (hallucinated) priors.
@@ -73,7 +74,7 @@ export class Orchestrator {
     if (needsGroundingSearch(task)) {
       const searchTool = tools.find((t) => /grok_search$|perplexity_ask$/.test(t.name));
       if (searchTool) {
-        const result = await safe(() => this.host.call(searchTool.name, { query: task }), "");
+        const result = await safe(() => this.host.call(searchTool.name, { query: task }, this.opts.signal), "");
         if (result) {
           grounding = `\n\n--- Grounding search results (base ALL facts about named entities/URLs on THIS; if it does not contain the answer, say you couldn't find it — do NOT invent) ---\n${result}`;
           toolCalls.push({ name: searchTool.name, args: { query: task }, result });
@@ -118,7 +119,7 @@ export class Orchestrator {
 
       messages.push({ role: "assistant", content: res.content, toolCalls: res.toolCalls });
       for (const tc of res.toolCalls) {
-        const result = await this.dispatch(tc, tools);
+        const result = await this.dispatch(tc, tools, this.opts.signal);
         emit({ type: "tool-result", name: tc.name, result });
         toolCalls.push({ name: tc.name, args: tc.arguments, result });
         messages.push({ role: "tool", content: result, toolCallId: tc.name });
@@ -130,19 +131,21 @@ export class Orchestrator {
     }
 
     // 3. LOG — persist the outcome back to dokoro so the next run remembers.
-    if (this.memory) await safe(() => this.memory!.log({ task, result: answer }), undefined);
+    if (this.memory) await safe(() => this.memory!.log({ task, result: answer }, this.opts.signal), undefined);
 
+    const costUsd = estimateCost(toolCalls);
+    emit({ type: "cost", usd: costUsd, calls: toolCalls.length });
     emit({ type: "final", answer, haltedBy });
-    return { answer, iterations, toolCalls, haltedBy };
+    return { answer, iterations, toolCalls, haltedBy, costUsd };
   }
 
   /** Dispatch one tool call through the ToolHost; never throws (errors are fed back to the model). */
-  private async dispatch(tc: ToolCall, tools: AgentTool[]): Promise<string> {
+  private async dispatch(tc: ToolCall, tools: AgentTool[], signal?: AbortSignal): Promise<string> {
     if (!tools.some((t) => t.name === tc.name)) {
       return `[error: unknown tool "${tc.name}". Available: ${tools.map((t) => t.name).join(", ")}]`;
     }
     try {
-      return await this.host.call(tc.name, tc.arguments);
+      return await this.host.call(tc.name, tc.arguments, signal);
     } catch (e) {
       return `[tool "${tc.name}" failed: ${e instanceof Error ? e.message : String(e)}]`;
     }

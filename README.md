@@ -118,6 +118,19 @@ All requests require `Authorization: Bearer <token>`; run IDs are namespaced per
 Async-job + SSE shape (resilient to disconnects, resumable replay via `id:`). Keep the
 model local even when the gateway is hosted; put rate-limit/quotas at this boundary.
 
+### OpenClaw bridge
+
+Let [OpenClaw](https://github.com/openclaw) delegate tasks to tachi-agent over the
+gateway HTTP/SSE API. Run `npm run gateway` (with `GATEWAY_TOKEN`), then from OpenClaw:
+
+```ts
+import { GatewayClient } from "tachi-agent";
+const tachi = new GatewayClient({ baseUrl: "http://127.0.0.1:8787", token: process.env.TACHI_GATEWAY_TOKEN! });
+const answer = await tachi.runAndWait("research X");
+```
+
+See [docs/openclaw-bridge.md](docs/openclaw-bridge.md) for the plugin/skill wiring.
+
 ## Extending (without forking)
 
 ```ts

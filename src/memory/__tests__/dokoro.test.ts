@@ -41,7 +41,8 @@ describe("DokoroMemory bridge (real dokoro round-trip: summary_add ↔ recall)",
     const call = vi.fn(async () => "prior context");
     const mem = new DokoroMemory(host([RECALL], call));
     const out = await mem.recall("verify ADRs");
-    expect(call).toHaveBeenCalledWith("dokoro_dokoro_session_recall", { query: "verify ADRs", limit: 5 });
+    // 3rd arg is the (optional) abort signal — undefined here since no signal was passed.
+    expect(call).toHaveBeenCalledWith("dokoro_dokoro_session_recall", { query: "verify ADRs", limit: 5 }, undefined);
     expect(out).toBe("prior context");
   });
 

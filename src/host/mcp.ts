@@ -20,7 +20,18 @@ export interface McpServerConfig {
 export interface McpToolHostOptions {
   /** Allowlist of namespaced tool names (exact) or `${server}_` prefixes. Empty/undefined = allow all. */
   allow?: string[];
+  /** Per-call wall-clock timeout in ms. A hung MCP tool MUST NOT block the run. Default 120_000. */
+  callTimeoutMs?: number;
 }
+
+/**
+ * Headroom (ms) added to the host's authoritative timeout when arming the MCP
+ * SDK's own per-request timer. The SDK ALWAYS arms a timer (its hidden default is
+ * DEFAULT_REQUEST_TIMEOUT_MSEC = 60_000); passing an explicit value just beyond
+ * the host deadline keeps the SDK from independently preempting long calls at 60s,
+ * while letting the host's AbortController remain the primary timeout authority.
+ */
+export const SDK_TIMEOUT_BACKSTOP_MS = 5_000;
 
 export function nsName(server: string, tool: string): string {
   return `${server}_${tool}`;
@@ -75,17 +86,58 @@ export class McpToolHost implements ToolHost {
     return this.merged;
   }
 
-  async call(name: string, args: Record<string, unknown>): Promise<string> {
+  async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
     if (!isAllowed(name, this.opts.allow)) throw new Error(`Tool "${name}" is not in the allowlist`);
     const { server, tool } = parseNs(name);
     const client = this.clients.get(server);
     if (!client) throw new Error(`No MCP server "${server}" connected`);
-    const res = (await client.callTool({ name: tool, arguments: args })) as { content?: Array<{ type?: string; text?: string }> };
-    const text = (res.content ?? [])
-      .filter((p) => p?.type === "text" && typeof p.text === "string")
-      .map((p) => p.text)
-      .join("\n");
-    return text || JSON.stringify(res.content ?? res);
+
+    const timeoutMs = this.opts.callTimeoutMs ?? 120_000;
+
+    // PRIMARY timeout authority: our own AbortController. The caller's signal and
+    // our timer both abort it; that single abort both cancels the SDK call (forwarded
+    // as `signal`, so the server gets a cancellation notification) AND settles our
+    // race promise with one deterministic, distinguishable error.
+    //
+    // The MCP SDK ALWAYS arms its own per-request timer (hidden default
+    // DEFAULT_REQUEST_TIMEOUT_MSEC = 60_000). If we passed only `signal`, the SDK
+    // would independently fire at 60s — silently capping any callTimeoutMs > 60_000
+    // (the default is 120_000) and stealing the race with its own "Request timed
+    // out" message. So we pass an explicit `timeout = timeoutMs + backstop`: the
+    // SDK timer becomes a BACKSTOP just beyond our authoritative deadline, never the
+    // active deadline. In practice our AbortController always wins first, so the
+    // deterministic message and the abort-vs-timeout distinction are preserved.
+    const timeoutAc = new AbortController();
+    const onCallerAbort = () => timeoutAc.abort();
+    signal?.addEventListener("abort", onCallerAbort, { once: true });
+    const timer = setTimeout(() => timeoutAc.abort(), timeoutMs);
+
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutAc.signal.addEventListener("abort", () => {
+        // Distinguish caller-abort from our own timeout in the error message.
+        reject(signal?.aborted
+          ? new Error(`Tool "${name}" aborted`)
+          : new Error(`Tool "${name}" timed out after ${timeoutMs}ms`));
+      }, { once: true });
+    });
+
+    try {
+      const res = (await Promise.race([
+        client.callTool({ name: tool, arguments: args }, undefined, {
+          signal: timeoutAc.signal,
+          timeout: timeoutMs + SDK_TIMEOUT_BACKSTOP_MS,
+        }),
+        timeout,
+      ])) as { content?: Array<{ type?: string; text?: string }> };
+      const text = (res.content ?? [])
+        .filter((p) => p?.type === "text" && typeof p.text === "string")
+        .map((p) => p.text)
+        .join("\n");
+      return text || JSON.stringify(res.content ?? res);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onCallerAbort);
+    }
   }
 
   async close(): Promise<void> {
