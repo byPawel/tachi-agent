@@ -23,4 +23,9 @@ describe("parseRoles", () => {
     const critic = DEFAULT_ROLES.find((r) => r.name === "critic");
     expect(critic?.critical).toBe(true);
   });
+  it("preserves the critical flag for known critical roles when configured explicitly", () => {
+    expect(parseRoles("critic")[0].critical).toBe(true);
+    expect(parseRoles("implementer")[0].critical).toBeUndefined();
+    expect(parseRoles("critic:hermes")[0].critical).toBe(true); // still set with a driver
+  });
 });
