@@ -11,6 +11,7 @@
 export * from "./types.js";
 export { Orchestrator } from "./agent.js";
 export { registerDriver, getDriver, listDrivers } from "./registry.js";
+import "./drivers/register.js"; // side-effect: register built-in "ollama" + "hermes" drivers
 
 import { Orchestrator } from "./agent.js";
 import { getDriver } from "./registry.js";
