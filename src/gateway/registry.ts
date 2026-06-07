@@ -12,6 +12,8 @@ const DEFAULT_BUFFER_MAX = 10_000;
 export interface RunRegistryOptions {
   /** Per-run event ring-buffer cap. Defaults to TACHI_SESSION_BUFFER_MAX ?? 10000. */
   bufferMax?: number;
+  /** Injectable clock (ms) for deterministic TTL/GC tests. Defaults to Date.now. */
+  now?: () => number;
 }
 
 export class RunRegistry {
@@ -20,11 +22,13 @@ export class RunRegistry {
   /** Live SSE-sink count per run (a connected client). Drives GC + drain. */
   private refs = new Map<string, number>();
   private readonly bufferMax: number;
+  private readonly now: () => number;
 
   constructor(opts: RunRegistryOptions = {}) {
     const envMax = Number(process.env.TACHI_SESSION_BUFFER_MAX);
     this.bufferMax =
       opts.bufferMax ?? (Number.isFinite(envMax) && envMax > 0 ? envMax : DEFAULT_BUFFER_MAX);
+    this.now = opts.now ?? Date.now;
   }
 
   create(tenant: string, task: string): RunRecord {
@@ -35,6 +39,7 @@ export class RunRegistry {
       status: "running",
       events: [],
       nextSeq: 0,
+      lastActivity: this.now(),
       controller: new AbortController(),
     };
     this.runs.set(record.id, record);
@@ -61,6 +66,7 @@ export class RunRegistry {
     const seq = ++record.nextSeq;
     record.events.push({ seq, event });
     if (record.events.length > this.bufferMax) record.events.shift(); // evict oldest
+    record.lastActivity = this.now();
     const set = this.subs.get(id);
     if (set) for (const cb of set) cb(event, seq);
     return seq;
@@ -97,6 +103,8 @@ export class RunRegistry {
   incRef(id: string): number {
     const n = (this.refs.get(id) ?? 0) + 1;
     this.refs.set(id, n);
+    const record = this.runs.get(id);
+    if (record) record.lastActivity = this.now();
     return n;
   }
 
@@ -104,6 +112,8 @@ export class RunRegistry {
   decRef(id: string): number {
     const n = Math.max(0, (this.refs.get(id) ?? 0) - 1);
     if (n === 0) this.refs.delete(id); else this.refs.set(id, n);
+    const record = this.runs.get(id);
+    if (record) record.lastActivity = this.now(); // a client just detached — restart the idle clock
     return n;
   }
 
@@ -118,7 +128,31 @@ export class RunRegistry {
     record.status = status;
     if (result) record.result = result;
     if (error) record.error = error;
+    record.lastActivity = this.now(); // start the TTL/GC idle clock from completion
     this.subs.delete(id); // release subscribers — the run emits no more events
+  }
+
+  /**
+   * Evict every collectable run and return the ids removed. A run is collectable only
+   * when it is simultaneously unattached (`refcount==0`), terminal (`status!=="running"`),
+   * and idle past the TTL — so an attached or still-running run is never collected, even
+   * when idle. This is the daemon's defense against unbounded ring-buffer accumulation.
+   */
+  collect(ttlMs: number): string[] {
+    const now = this.now();
+    const evicted: string[] = [];
+    for (const [id, record] of this.runs) {
+      const unattached = (this.refs.get(id) ?? 0) === 0;
+      const terminal = record.status !== "running";
+      const idleTooLong = now - record.lastActivity > ttlMs;
+      if (unattached && terminal && idleTooLong) {
+        this.runs.delete(id);
+        this.subs.delete(id);
+        this.refs.delete(id);
+        evicted.push(id);
+      }
+    }
+    return evicted;
   }
 
   /** Count a tenant's currently-running runs (for concurrency caps). */

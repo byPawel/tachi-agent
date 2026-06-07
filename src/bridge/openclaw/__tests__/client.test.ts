@@ -188,6 +188,54 @@ describe("GatewayClient.attach", () => {
     await p.catch(() => {});
     expect(calls.some((c) => c.url.endsWith("/runs/rid/cancel") && c.method === "POST")).toBe(true);
   });
+
+  it("treats a `shutdown` frame as a terminal error, never forwarding it through onEvent", async () => {
+    const frames = [
+      formatSse({ type: "step", iteration: 1 }, 1),
+      formatSse({ type: "shutdown", reason: "server draining" }, 2),
+    ];
+    const fetchImpl = (async () => sseResponse(frames)) as unknown as typeof fetch;
+    const client = new GatewayClient({ baseUrl: "http://gw", token: "t", fetchImpl });
+
+    const seen: AgentEvent[] = [];
+    const outcome = await client.attach("rid", { lastEventId: 0, onEvent: (e) => seen.push(e) });
+
+    expect(seen.map((e) => e.type)).toEqual(["step"]); // shutdown is NOT forwarded as an AgentEvent
+    expect(outcome).toEqual({ status: "error", answer: undefined, error: "server shutting down" });
+  });
+
+  it("does NOT false-gap a fresh attach whose oldest available frame was id-shifted by eviction", async () => {
+    // lastEventId 0, but the server's oldest surviving replay is seq 5 (1..4 evicted).
+    const frames = [
+      formatSse({ type: "step", iteration: 5 }, 5),
+      formatSse({ type: "step", iteration: 6 }, 6),
+      formatSse({ type: "final", answer: "ok", haltedBy: "final-answer" }, 7),
+    ];
+    const fetchImpl = (async () => sseResponse(frames)) as unknown as typeof fetch;
+    const client = new GatewayClient({ baseUrl: "http://gw", token: "t", fetchImpl });
+
+    const seenIds: number[] = [];
+    const seen: string[] = [];
+    const outcome = await client.attach("rid", {
+      lastEventId: 0,
+      onEvent: (e) => { seen.push(e.type); if (e.type === "step") seenIds.push(e.iteration); },
+    });
+
+    expect(seen).toEqual(["step", "step", "final"]); // anchored to id 5, then 6,7 contiguous — no throw
+    expect(seenIds).toEqual([5, 6]);
+    expect(outcome).toEqual({ status: "final", answer: "ok", error: undefined });
+  });
+
+  it("still throws a continuity gap for a fresh attach AFTER the anchor (a true hole)", async () => {
+    // Anchor to 5, then jump to 7 (seq 6 missing) → real gap → throw.
+    const frames = [
+      formatSse({ type: "step", iteration: 5 }, 5),
+      formatSse({ type: "step", iteration: 7 }, 7),
+    ];
+    const fetchImpl = (async () => sseResponse(frames)) as unknown as typeof fetch;
+    const client = new GatewayClient({ baseUrl: "http://gw", token: "t", fetchImpl });
+    await expect(client.attach("rid", { lastEventId: 0, onEvent: () => {} })).rejects.toThrow(/continuity|gap/i);
+  });
 });
 
 describe("remoteClient (UnifiedClient adapter)", () => {

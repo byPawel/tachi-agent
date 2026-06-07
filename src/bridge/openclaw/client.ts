@@ -220,6 +220,9 @@ export class GatewayClient {
     const reader = (res.body as ReadableStream<Uint8Array>).getReader();
     let outcome: RunOutcome | undefined;
     let expectedNext = lastEventId + 1; // the next data-event seq we expect to see
+    // A fresh attach (lastEventId 0) hasn't seen anything yet, so it adopts whatever the
+    // server's oldest available frame is — early events may have been evicted from the ring.
+    let anchorToFirst = lastEventId === 0;
 
     try {
       for (;;) {
@@ -227,14 +230,29 @@ export class GatewayClient {
         const chunk = done ? decoder.decode() : decoder.decode(value, { stream: true });
         for (const frame of parser.push(chunk)) {
           if (frame.event === "heartbeat") continue; // heartbeats carry maxSeq, not next-seq
-          const event = JSON.parse(frame.data) as AgentEvent | { type: "error"; message: string };
+          const event = JSON.parse(frame.data) as
+            | AgentEvent
+            | { type: "error"; message: string }
+            | { type: "shutdown"; reason: string };
           if (event.type === "error") {
             outcome = { status: "error", error: (event as { message: string }).message };
+            continue;
+          }
+          if (event.type === "shutdown") {
+            // The daemon is draining — treat as a terminal error rather than leaking a
+            // non-AgentEvent through onEvent (it is NOT a heartbeat/error/agent event).
+            outcome = { status: "error", error: "server shutting down" };
             continue;
           }
           // Continuity check on data events: ids must be contiguous (no skip), and we
           // dedupe a replayed event we've already counted (id < expectedNext).
           if (frame.id !== undefined) {
+            if (anchorToFirst) {
+              // First frame of a fresh attach: accept the server's oldest-available id as
+              // the start of the sequence (don't false-positive a "gap" when seq 1 was evicted).
+              expectedNext = frame.id;
+              anchorToFirst = false;
+            }
             if (frame.id < expectedNext) continue;            // already-seen duplicate → skip
             if (frame.id > expectedNext) {                     // a hole → events were lost
               throw new GatewayHttpError(

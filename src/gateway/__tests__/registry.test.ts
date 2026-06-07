@@ -100,4 +100,76 @@ describe("RunRegistry", () => {
     expect(a.result?.answer).toBe("OK");
     expect(reg.list("alice").map((r) => r.id)).toEqual([a.id]);
   });
+
+  describe("collect() TTL/GC", () => {
+    it("evicts only finished + unattached + idle-past-TTL runs", () => {
+      let now = 1000;
+      const reg = new RunRegistry({ now: () => now });
+
+      const idle = reg.create("a", "done-and-idle");
+      reg.finish(idle.id, "done");
+
+      const running = reg.create("a", "still-running"); // status running → never GC'd
+
+      const attached = reg.create("a", "attached");
+      reg.finish(attached.id, "done");
+      reg.incRef(attached.id); // refcount>0 → never GC'd
+
+      now = 1000 + 60_000 + 1; // advance past a 60s TTL
+      const evicted = reg.collect(60_000);
+
+      expect(evicted).toEqual([idle.id]); // only the idle, finished, unattached one
+      expect(reg.get(idle.id)).toBeUndefined();
+      expect(reg.get(running.id)).toBeDefined();
+      expect(reg.get(attached.id)).toBeDefined();
+    });
+
+    it("does NOT evict a finished+idle run before its TTL elapses", () => {
+      let now = 1000;
+      const reg = new RunRegistry({ now: () => now });
+      const r = reg.create("a", "t");
+      reg.finish(r.id, "done");
+      now = 1000 + 30_000; // 30s < 60s TTL
+      expect(reg.collect(60_000)).toEqual([]);
+      expect(reg.get(r.id)).toBeDefined();
+    });
+
+    it("a detached client restarts the idle clock (decRef refreshes lastActivity)", () => {
+      let now = 1000;
+      const reg = new RunRegistry({ now: () => now });
+      const r = reg.create("a", "t");
+      reg.finish(r.id, "done");
+      reg.incRef(r.id);   // a client attaches
+      now = 1000 + 120_000;
+      reg.decRef(r.id);   // …then detaches well past the TTL — but decRef refreshes activity
+      now = 1000 + 120_000 + 30_000; // only 30s since the detach < 60s TTL
+      expect(reg.collect(60_000)).toEqual([]);
+      now = 1000 + 120_000 + 60_000 + 1; // now past the TTL since the detach
+      expect(reg.collect(60_000)).toEqual([r.id]);
+    });
+
+    it("a late event append refreshes the idle clock so an active stream survives", () => {
+      let now = 1000;
+      const reg = new RunRegistry({ now: () => now });
+      const r = reg.create("a", "t");
+      reg.finish(r.id, "done");
+      now = 1000 + 59_000;
+      reg.append(r.id, { type: "heartbeat" }); // late activity
+      now = 1000 + 59_000 + 30_000; // 30s since the append < 60s TTL
+      expect(reg.collect(60_000)).toEqual([]);
+    });
+
+    it("fully removes a collected run's subscribers + refcount (no leak)", () => {
+      let now = 1000;
+      const reg = new RunRegistry({ now: () => now });
+      const r = reg.create("a", "t");
+      reg.subscribe(r.id, () => {});
+      reg.finish(r.id, "done");
+      now = 1000 + 60_001;
+      expect(reg.collect(60_000)).toEqual([r.id]);
+      // appending to an evicted id is a no-op (returns seq 0), confirming the run is gone.
+      expect(reg.append(r.id, { type: "heartbeat" })).toBe(0);
+      expect(reg.refcount(r.id)).toBe(0);
+    });
+  });
 });

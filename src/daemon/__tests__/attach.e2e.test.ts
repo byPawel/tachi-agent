@@ -4,7 +4,6 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { createGatewayServer, type GatewayControls } from "../../gateway/server.js";
 import { GatewayClient } from "../../bridge/openclaw/client.js";
-import { SessionStore } from "../session-store.js";
 import type { AgentEvent } from "../../types.js";
 
 /**
@@ -83,9 +82,6 @@ async function consumeThenDrop(url: string, n: number): Promise<number[]> {
 
 describe("daemon e2e: attach survives an SSE reconnect with no gap/dup", () => {
   it("consumes a few events, drops the socket, then attaches with the last seq and settles on final", async () => {
-    const sessions = new SessionStore(); // the daemon's session table runs alongside the live gateway
-    expect(sessions.size).toBe(0);
-
     const client = new GatewayClient({ baseUrl: base, token: "s3cret" });
     const { runId } = await client.startRun("delegate + reconnect");
 
@@ -124,5 +120,55 @@ describe("daemon e2e: attach survives an SSE reconnect with no gap/dup", () => {
     expect(seen).toEqual(["step", "step", "step", "final"]); // seq 1..4, contiguous
     expect(outcome.status).toBe("final");
     expect(outcome.answer).toBe("RECONNECTED");
+  });
+});
+
+/** Runtime that finishes a run immediately (one step + final) — for the GC sweep test. */
+const immediateRuntime = {
+  orchestrator(opts: { onEvent?: (e: AgentEvent) => void }) {
+    return {
+      run: async (_task: string) => {
+        opts.onEvent?.({ type: "step", iteration: 1 });
+        opts.onEvent?.({ type: "final", answer: "DONE", haltedBy: "final-answer" });
+        return { answer: "DONE", iterations: 1, toolCalls: [], haltedBy: "final-answer" as const, costUsd: 0 };
+      },
+    };
+  },
+} as unknown as Parameters<typeof createGatewayServer>[0];
+
+describe("daemon TTL/GC actually evicts finished runs from the live gateway", () => {
+  it("a completed, unattached run is gone from the registry after a sweep past TTL", async () => {
+    let now = 1_000_000;
+    const controls: GatewayControls = { draining: false, sinks: new Set() };
+    const gcServer = createGatewayServer(immediateRuntime, {
+      env: { GATEWAY_TOKEN: "s3cret" },
+      controls,
+      now: () => now, // injected clock drives the TTL deterministically
+    });
+    await new Promise<void>((res) => gcServer.listen(0, res));
+    const gcBase = `http://127.0.0.1:${(gcServer.address() as AddressInfo).port}`;
+    try {
+      const client = new GatewayClient({ baseUrl: gcBase, token: "s3cret" });
+      const { runId } = await client.startRun("gc me");
+
+      // Let the run complete; never attach an SSE sink → refcount stays 0.
+      let state = await client.getStatus(runId);
+      for (let i = 0; i < 30 && state.status === "running"; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+        state = await client.getStatus(runId);
+      }
+      expect(state.status).toBe("done");
+
+      // Before TTL: a sweep evicts nothing; the run is still queryable.
+      expect(controls.collect!(60_000)).toEqual([]);
+      expect((await client.getStatus(runId)).status).toBe("done");
+
+      // Advance past the TTL and sweep → the run is evicted and now 404s.
+      now += 60_001;
+      expect(controls.collect!(60_000)).toEqual([runId]);
+      await expect(client.getStatus(runId)).rejects.toMatchObject({ status: 404 });
+    } finally {
+      await new Promise<void>((res) => { gcServer.closeAllConnections?.(); gcServer.close(() => res()); });
+    }
   });
 });

@@ -21,10 +21,13 @@ export interface GatewayOptions {
   maxConcurrentPerTenant?: number;
   /** Per-run event ring-buffer cap (Last-Event-ID replay depth). Default TACHI_SESSION_BUFFER_MAX ?? 10000. */
   sessionBufferMax?: number;
+  /** Injectable clock (ms) for deterministic TTL/GC tests. Defaults to Date.now. */
+  now?: () => number;
   /**
    * Optional drain control surface (used by the daemon). When `draining` is true,
    * new `POST /runs` are rejected with 503; the daemon broadcasts a final shutdown
-   * frame to every live SSE sink tracked in `sinks` before exiting.
+   * frame to every live SSE sink tracked in `sinks` before exiting. The gateway also
+   * populates `controls.collect` so the daemon's GC timer can sweep the run registry.
    */
   controls?: GatewayControls;
   /** Token config source. Defaults to process.env. */
@@ -37,6 +40,13 @@ export interface GatewayControls {
   draining: boolean;
   /** Every currently-open SSE response (a live event sink). */
   sinks: Set<http.ServerResponse>;
+  /**
+   * TTL/GC sweep over the gateway's run registry — evicts unattached, finished runs
+   * idle past `ttlMs`, returning the evicted ids. The gateway populates this so the
+   * daemon's periodic timer can reclaim ring-buffer memory. No-op until the server is
+   * created.
+   */
+  collect?: (ttlMs: number) => string[];
 }
 
 class HttpError extends Error {
@@ -66,12 +76,14 @@ export function createGatewayServer(
   runtime: Pick<AgentRuntime, "orchestrator">,
   opts: GatewayOptions = {},
 ): http.Server {
-  const registry = new RunRegistry({ bufferMax: opts.sessionBufferMax });
+  const registry = new RunRegistry({ bufferMax: opts.sessionBufferMax, now: opts.now });
   const env = opts.env ?? process.env;
   const heartbeatMs = opts.heartbeatMs ?? 15000;
   const maxConcurrent = opts.maxConcurrentPerTenant ?? 16;
   const iterationCeiling = opts.maxIterations ?? 50;
   const controls = opts.controls;
+  // Expose the registry's TTL/GC sweep to the daemon (drives periodic memory reclaim).
+  if (controls) controls.collect = (ttlMs: number) => registry.collect(ttlMs);
 
   return http.createServer(async (req, res) => {
     try {

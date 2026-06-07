@@ -14,7 +14,6 @@ import { buildAgentFromEnv as buildAgentFromEnvDefault, type AgentRuntime } from
 
 export interface RunOptions {
   onEvent: (e: AgentEvent) => void;
-  onHalted?: () => void;
   signal?: AbortSignal;
   /** Per-run caps. Omitted → the runtime/daemon applies its own defaults. */
   maxIterations?: number;

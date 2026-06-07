@@ -29,6 +29,11 @@ export interface RunRecord {
   events: SeqEvent[];
   /** Next seq to assign (so seq survives ring eviction). Starts at 0; first event is 1. */
   nextSeq: number;
+  /**
+   * Epoch ms of the last activity (create, event append, or subscriber connect/close).
+   * Drives TTL/GC: a finished, unattached run idle past the TTL is collectable.
+   */
+  lastActivity: number;
   result?: RunResult;
   error?: string;
   controller: AbortController;
