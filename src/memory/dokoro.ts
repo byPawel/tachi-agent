@@ -64,7 +64,7 @@ export class DokoroMemory implements Memory {
   async recall(task: string, signal?: AbortSignal): Promise<string> {
     const tool = this.find(/session_recall$/);
     if (!tool) return "";
-    const args = pickSchemaArgs(tool.parameters, { query: task, limit: this.opts.limit ?? 5 });
+    const args = pickSchemaArgs(tool.parameters, { query: task, limit: this.opts.limit ?? 5, session_id: this.sessionId });
     try {
       const out = await this.host.call(tool.name, args, signal);
       return out?.includes("no past sessions") ? "" : out;

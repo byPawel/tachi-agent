@@ -37,12 +37,17 @@ describe("pickSchemaArgs", () => {
 });
 
 describe("DokoroMemory bridge (real dokoro round-trip: summary_add ↔ recall)", () => {
-  it("recall discovers session_recall by suffix and calls it with {query,limit}", async () => {
-    const call = vi.fn(async () => "prior context");
+  it("recall discovers session_recall by suffix and calls it with {query,limit,session_id}", async () => {
+    const call = vi.fn(async (_name: string, _args: Record<string, unknown>) => "prior context");
+    // No explicit sessionId → falls back to the per-day default "tachi-agent-YYYY-MM-DD".
     const mem = new DokoroMemory(host([RECALL], call));
     const out = await mem.recall("verify ADRs");
-    // 3rd arg is the (optional) abort signal — undefined here since no signal was passed.
-    expect(call).toHaveBeenCalledWith("dokoro_dokoro_session_recall", { query: "verify ADRs", limit: 5 }, undefined);
+    expect(call).toHaveBeenCalledTimes(1);
+    const [, args] = call.mock.calls[0];
+    expect(args).toMatchObject({ query: "verify ADRs", limit: 5 });
+    // session_id is now always forwarded when the schema declares it
+    expect(args).toHaveProperty("session_id");
+    expect(typeof args["session_id"]).toBe("string");
     expect(out).toBe("prior context");
   });
 
@@ -74,5 +79,39 @@ describe("DokoroMemory bridge (real dokoro round-trip: summary_add ↔ recall)",
     const call = vi.fn(async () => { throw new Error("dokoro down"); });
     const mem = new DokoroMemory(host([SUMMARY], call));
     await expect(mem.log({ task: "t", result: "r" })).resolves.toBeUndefined();
+  });
+
+  // --- session_id scoping (the bug: recall was global, not per-session) ---
+
+  it("recall passes session_id when the tool schema declares it", async () => {
+    // RECALL already has session_id in its properties (see top of file)
+    const call = vi.fn(async () => "prior context");
+    const mem = new DokoroMemory(host([RECALL], call), { sessionId: "sess-123" });
+    const out = await mem.recall("find the login bug");
+    expect(call).toHaveBeenCalledWith(
+      "dokoro_dokoro_session_recall",
+      { query: "find the login bug", limit: 5, session_id: "sess-123" },
+      undefined,
+    );
+    expect(out).toBe("prior context");
+  });
+
+  it("recall omits session_id when the tool schema does not declare it (older dokoro)", async () => {
+    const RECALL_NO_SESSION_ID: AgentTool = {
+      name: "dokoro_dokoro_session_recall",
+      description: "recall (legacy schema)",
+      parameters: {
+        type: "object",
+        properties: { query: {}, limit: {} },
+        additionalProperties: false,
+      },
+    };
+    const call = vi.fn(async (_name: string, _args: Record<string, unknown>) => "legacy result");
+    const mem = new DokoroMemory(host([RECALL_NO_SESSION_ID], call), { sessionId: "sess-456" });
+    const out = await mem.recall("find the login bug");
+    const [, args] = call.mock.calls[0];
+    expect(args).toHaveProperty("query", "find the login bug");
+    expect(args).not.toHaveProperty("session_id");
+    expect(out).toBe("legacy result");
   });
 });
