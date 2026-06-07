@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Get started — tachi-agent</title>
+  <meta name="description" content="Install, build, and run tachi-agent locally with Qwen2.5 / Ollama. Front-ends, config env vars, and how to extend the Driver / ToolHost / Memory seams without forking." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="wordmark" href="index.html"><span class="kanji">太刀</span> tachi-agent</a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="get-started.html">Get started</a></li>
+        <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow hero-anim d1">// from clone to first answer</p>
+      <h1 class="hero-anim d2">Get started</h1>
+      <p class="hero-sub hero-anim d3">
+        No API keys, no cloud account. Pull a local model, point at your MCP servers, build,
+        and run your first task. <strong>Ctrl-C</strong> halts cleanly; progress to stderr,
+        the answer to stdout.
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== INSTALL / DEVELOP ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">01</span>
+          <span class="sec-kicker"><span class="box">┌─</span> install &amp; develop</span>
+          <h2 class="sec-title">Clone, test, build.</h2>
+        </div>
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — develop</span>
+            <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
+          </div>
+<pre>npm install
+npm test       <span class="c"># vitest — core orchestrator, fully mocked</span>
+npm run build  <span class="c"># tsc → dist/</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== RUN ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">02</span>
+          <span class="sec-kicker"><span class="box">//</span> run it locally</span>
+          <h2 class="sec-title">A local brain in four steps.</h2>
+        </div>
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — first run</span>
+            <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
+          </div>
+<pre><span class="c"># 1. local brain</span>
+ollama serve &amp;
+ollama pull qwen2.5
+
+<span class="c"># 2. point at your MCP servers (council + memory)</span>
+<span class="k">export</span> TACHIBOT_CMD=<span class="s">"npx -y tachibot-mcp"</span>
+<span class="k">export</span> DOKORO_CMD=<span class="s">"npx -y @devlog-mcp/core"</span>   <span class="c"># optional</span>
+
+<span class="c"># 3. build + run</span>
+npm install &amp;&amp; npm run build
+node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
+        </div>
+        <div class="prose">
+          <p>
+            <kbd>Ctrl</kbd> + <kbd>C</kbd> halts the run cleanly (<code>AbortSignal</code> →
+            <code>aborted</code>). Progress streams to <strong>stderr</strong>; the final answer
+            prints to <strong>stdout</strong> — so you can pipe the answer while still watching steps.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FRONT-ENDS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">┌─</span> front-ends</span>
+          <h2 class="sec-title">Talk to the same hub, any surface.</h2>
+        </div>
+        <div class="prose">
+          <ul>
+            <li><strong>CLI</strong> — one-shot tasks: <code>node dist/cli.js "…"</code>.</li>
+            <li><strong>REPL</strong> — interactive session loop.</li>
+            <li><strong>Telegram</strong> — bot front-end with allowed user-ids.</li>
+            <li><strong>Slack</strong> — Socket Mode app.</li>
+            <li><strong>Claude Code</strong> — connect in via the <code>run_agent</code> MCP server.</li>
+            <li><strong>HTTP / SSE Gateway</strong> — async jobs + streamed events.</li>
+            <li><strong>OpenClaw bridge</strong> — delegate over the gateway with <code>GatewayClient</code>.</li>
+            <li><strong>Swarm</strong> — fan-out / synthesize bin: <code>npm run swarm</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== CONFIG ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">03</span>
+          <span class="sec-kicker"><span class="box">//</span> configuration</span>
+          <h2 class="sec-title">Env vars are the config surface.</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Variable</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>OLLAMA_BASE_URL</code></td><td>Ollama endpoint for the local brain (defaults to <code>127.0.0.1</code>).</td></tr>
+              <tr><td><code>OLLAMA_MODEL</code></td><td>Local model id, e.g. <code>qwen2.5</code>.</td></tr>
+              <tr><td><code>TACHIBOT_CMD</code></td><td>Command to launch the tachibot MCP server (council tools).</td></tr>
+              <tr><td><code>DOKORO_CMD</code></td><td>Command to launch the dokoro MCP server (memory). Optional.</td></tr>
+              <tr><td><code>TACHI_ALLOW</code></td><td>Tool allowlist — restricts which namespaced tools the agent may call.</td></tr>
+              <tr><td><code>TACHI_SWARM_ROLES</code></td><td>Comma-separated roles for the swarm; <code>name</code> or <code>name:driver</code>; empty = defaults.</td></tr>
+              <tr><td><code>GATEWAY_TOKEN</code> / <code>GATEWAY_PORT</code></td><td>Bearer token and port for the HTTP/SSE gateway.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== EXTENDING ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">04</span>
+          <span class="sec-kicker"><span class="box">┌─</span> extending</span>
+          <h2 class="sec-title">Extend without forking.</h2>
+          <p class="sec-lead">Register any brain, build the hub from a name, run. Implement <strong>Driver</strong> / <strong>ToolHost</strong> / <strong>Memory</strong> to extend — no core changes.</p>
+        </div>
+        <div class="code" data-lang="ts">
+          <div class="code-head">
+            <span class="code-label">typescript — register a driver</span>
+            <button class="copy-btn" aria-label="Copy code to clipboard">copy</button>
+          </div>
+<pre><span class="k">import</span> { createOrchestrator, registerDriver } <span class="k">from</span> <span class="s">"tachi-agent"</span>;
+
+<span class="c">// 1. register any brain (Hermes, a cloud model, OpenClaw, a Kimi-swarm driver)</span>
+registerDriver(<span class="s">"hermes"</span>, () =&gt; <span class="k">new</span> HermesDriver());
+
+<span class="c">// 2. build the hub from a registered name (or a raw Driver instance)</span>
+<span class="k">const</span> controller = <span class="k">new</span> AbortController();
+<span class="k">const</span> result = <span class="k">await</span> createOrchestrator({
+  driver: <span class="s">"hermes"</span>,
+  host,
+  memory,
+  options: { maxIterations: 12, timeoutMs: 90_000, signal: controller.signal },
+}).run(<span class="s">"verify HEAD against ADR-1..3"</span>);
+<span class="c">// elsewhere: controller.abort() → run halts with haltedBy: "aborted"</span></pre>
+        </div>
+        <div class="prose">
+          <p>The complete public API is three interfaces — see <code>src/types.ts</code>. Implement <code>Driver</code>, <code>ToolHost</code>, or <code>Memory</code> and compose the same hub; no core changes required.</p>
+          <p><a href="architecture.html">Read the architecture →</a> &nbsp;·&nbsp; <a href="swarm.html">Run a swarm →</a></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP</div>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="deploy.html">Deploy</a>
+        <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="footer-mark" aria-hidden="true">太刀</div>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
