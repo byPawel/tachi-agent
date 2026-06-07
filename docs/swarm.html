@@ -80,9 +80,9 @@
 
             <!-- fan-out: trunk down, then three diverging lanes (parallel) -->
             <path class="d-edge-accent d-draw" style="--d-len:50;--d-delay:.35s" d="M490 108 V146" stroke-width="2.5" />
-            <path class="d-edge-accent d-draw" style="--d-len:340;--d-delay:.5s" d="M490 146 C 380 162, 230 168, 195 214" stroke-width="2" marker-end="url(#sArrow)" />
-            <path class="d-edge-accent d-draw" style="--d-len:90;--d-delay:.62s"  d="M490 146 V214" stroke-width="2" marker-end="url(#sArrow)" />
-            <path class="d-edge-accent d-draw" style="--d-len:340;--d-delay:.74s" d="M490 146 C 600 162, 750 168, 785 214" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:340;--d-delay:.5s" d="M490 146 C 380 162, 230 168, 195 220" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:90;--d-delay:.62s"  d="M490 146 V220" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:340;--d-delay:.74s" d="M490 146 C 600 162, 750 168, 785 220" stroke-width="2" marker-end="url(#sArrow)" />
             <g class="d-fade" style="--d-delay:.6s">
               <rect x="546" y="150" width="186" height="24" rx="3" fill="rgba(228,87,46,.12)" stroke="#E4572E" stroke-width="1" />
               <text class="d-accent" x="639" y="167" text-anchor="middle" font-size="10.5" font-weight="700">fan out · parallel · cap 4</text>
@@ -121,9 +121,9 @@
             <text class="d-mono d-fade" style="--d-delay:1.2s" x="490" y="362" text-anchor="middle" font-size="10" opacity=".85">each member writes its own isolated dokoro session · never reads peers</text>
 
             <!-- ============ FAN-IN → SYNTHESIZER ============ -->
-            <path class="d-edge-accent d-draw" style="--d-len:200;--d-delay:1.35s" d="M195 342 C 230 410, 360 420, 408 444" stroke-width="2" marker-end="url(#sArrow)" />
-            <path class="d-edge-accent d-draw" style="--d-len:130;--d-delay:1.42s" d="M490 342 V444" stroke-width="2" marker-end="url(#sArrow)" />
-            <path class="d-edge-accent d-draw" style="--d-len:200;--d-delay:1.49s" d="M785 342 C 750 410, 620 420, 572 444" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:200;--d-delay:1.35s" d="M195 342 C 230 410, 360 420, 408 450" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:130;--d-delay:1.42s" d="M490 342 V450" stroke-width="2" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:200;--d-delay:1.49s" d="M785 342 C 750 410, 620 420, 572 450" stroke-width="2" marker-end="url(#sArrow)" />
             <g class="d-fade" style="--d-delay:1.5s">
               <rect x="612" y="392" width="150" height="24" rx="3" fill="rgba(228,87,46,.12)" stroke="#E4572E" stroke-width="1" />
               <text class="d-accent" x="687" y="409" text-anchor="middle" font-size="10.5" font-weight="700">labeled answers</text>
@@ -146,7 +146,7 @@
             </g>
 
             <!-- ============ FINAL ANSWER ============ -->
-            <path class="d-edge-accent d-draw" style="--d-len:60;--d-delay:1.85s" d="M490 552 V602" stroke-width="2.5" marker-end="url(#sArrow)" />
+            <path class="d-edge-accent d-draw" style="--d-len:60;--d-delay:1.85s" d="M490 552 V604" stroke-width="2.5" marker-end="url(#sArrow)" />
             <g class="d-fade" style="--d-delay:1.95s">
               <rect class="d-node" x="380" y="606" width="220" height="62" rx="3" filter="url(#sShadow)" />
               <text class="d-title" x="490" y="634" text-anchor="middle" font-size="14">one answer</text>
