@@ -28,4 +28,11 @@ describe("parseRoles", () => {
     expect(parseRoles("implementer")[0].critical).toBeUndefined();
     expect(parseRoles("critic:hermes")[0].critical).toBe(true); // still set with a driver
   });
+  it("returns a fresh array on the default path (callers cannot corrupt DEFAULT_ROLES)", () => {
+    const a = parseRoles("");
+    expect(a).not.toBe(DEFAULT_ROLES); // distinct reference, not the shared constant
+    a.push({ name: "rogue", systemPrompt: "x" });
+    expect(DEFAULT_ROLES.some((r) => r.name === "rogue")).toBe(false);
+    expect(parseRoles(undefined)).toHaveLength(DEFAULT_ROLES.length); // still intact
+  });
 });
