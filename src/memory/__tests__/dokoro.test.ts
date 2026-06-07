@@ -115,3 +115,45 @@ describe("DokoroMemory bridge (real dokoro round-trip: summary_add ↔ recall)",
     expect(out).toBe("legacy result");
   });
 });
+
+// ── shared_note_append tool fixture ─────────────────────────────────────────
+const NOTE_TOOL: AgentTool = {
+  name: "dokoro_dokoro_shared_note_append",
+  description: "append a working-memory note",
+  parameters: {
+    type: "object",
+    properties: { agent_id: {}, content: {}, note_type: {}, metadata: {} },
+    additionalProperties: false,
+  },
+};
+
+describe("DokoroMemory.note (working-memory scratchpad)", () => {
+  it("appends via shared_note_append with agent_id + content + note_type 'scratch'", async () => {
+    const call = vi.fn(async (_name: string, _args: Record<string, unknown>) => "ok");
+    const mem = new DokoroMemory(host([NOTE_TOOL], call), { sessionId: "s1", aiModel: "qwen" });
+    await mem.note({ task: "t", note: "did X" });
+    expect(call).toHaveBeenCalledTimes(1);
+    const [name, args] = call.mock.calls[0];
+    expect(name).toBe("dokoro_dokoro_shared_note_append");
+    expect(args).toMatchObject({
+      agent_id: "qwen",
+      content: "did X",
+      note_type: "scratch",
+      metadata: { session_id: "s1", task: "t" },
+    });
+  });
+
+  it("no-ops when shared_note_append is absent", async () => {
+    const call = vi.fn(async () => "ok");
+    // Host exposes only the recall tool — no note tool
+    const mem = new DokoroMemory(host([RECALL], call), { sessionId: "s1" });
+    await expect(mem.note({ task: "t", note: "x" })).resolves.toBeUndefined();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("swallows host.call errors (best-effort; never fail the run)", async () => {
+    const call = vi.fn(async () => { throw new Error("dokoro down"); });
+    const mem = new DokoroMemory(host([NOTE_TOOL], call), { sessionId: "s1" });
+    await expect(mem.note({ task: "t", note: "x" })).resolves.toBeUndefined();
+  });
+});

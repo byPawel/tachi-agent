@@ -67,6 +67,12 @@ export interface ToolHost {
 export interface Memory {
   recall(task: string, signal?: AbortSignal): Promise<string>;
   log(entry: { task: string; result: string }, signal?: AbortSignal): Promise<void>;
+  /**
+   * Optional working-memory write: a per-step scratchpad note during the ReAct
+   * loop (used only in memory-in-loop mode). Implementations may omit it / no-op.
+   * Default impl (DokoroMemory) appends to dokoro's shared working memory.
+   */
+  note?(entry: { task: string; note: string }, signal?: AbortSignal): Promise<void>;
 }
 
 /**
@@ -91,6 +97,13 @@ export interface OrchestratorOptions {
   signal?: AbortSignal;
   /** Streaming hook — called as the run progresses, for live front-end output. */
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Opt-in working-memory mode. When true (and a Memory is present), the loop
+   * refreshes recall each iteration and writes a per-step note via Memory.note,
+   * instead of only the recall→log bookend. Default false — zero change for
+   * existing callers (a small local model degrades with extra per-step tool calls).
+   */
+  memoryInLoop?: boolean;
 }
 
 export interface RunResult {
