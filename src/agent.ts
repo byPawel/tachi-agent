@@ -87,7 +87,9 @@ export class Orchestrator {
     // the top so each iteration sees recall refreshed for the evolving state.
     // Gated so the default path (memoryInLoop unset/false) is byte-identical.
     const memoryInLoop = (this.opts.memoryInLoop ?? false) && !!this.memory;
-    const liveMemory: ChatMessage | null = memoryInLoop ? { role: "system", content: "" } : null;
+    const liveMemory: ChatMessage | null = memoryInLoop
+      ? { role: "system", content: recalled ? `--- Live memory (refreshed for the current step) ---\n${recalled}` : "" }
+      : null;
 
     const messages: ChatMessage[] = [
       {
@@ -95,7 +97,7 @@ export class Orchestrator {
         content:
           (this.opts.systemPrompt ? this.opts.systemPrompt + "\n\n" : "") +
           BASE_SYSTEM +
-          (recalled ? `\n\n--- Relevant prior context (memory) ---\n${recalled}` : "") +
+          (recalled && !memoryInLoop ? `\n\n--- Relevant prior context (memory) ---\n${recalled}` : "") +
           grounding,
       },
       ...(liveMemory ? [liveMemory] : []),
