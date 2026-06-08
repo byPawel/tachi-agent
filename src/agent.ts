@@ -16,6 +16,7 @@ import type {
 } from "./types.js";
 import { needsGroundingSearch } from "./router.js";
 import { estimateCost } from "./cost.js";
+import { emitContextInspect, isContextInspectEnvEnabled } from "./context-inspect.js";
 
 const BASE_SYSTEM = `You are TachiAgent, a local-first orchestration agent driving a ReAct loop.
 Your tools come from two sources:
@@ -104,6 +105,11 @@ export class Orchestrator {
       { role: "user", content: task },
     ];
 
+    // Context inspector (opt-in): emit one JSONL event before each driver.chat.
+    // Gated once here so the default path (flag unset) takes ZERO new awaits and
+    // stays byte-identical — pure observability that never throws into the loop.
+    const contextInspect = this.opts.contextInspect ?? isContextInspectEnvEnabled();
+
     // 2. REASON+ACT — the ReAct loop, with hard HALT guards.
     const emit = this.opts.onEvent ?? (() => {});
     let haltedBy: RunResult["haltedBy"] = "max-iterations";
@@ -115,6 +121,11 @@ export class Orchestrator {
       if (Date.now() > deadline) { haltedBy = "timeout"; break; }
       iterations++;
       emit({ type: "step", iteration: iterations });
+
+      // Immediately before the model call: snapshot the assembled context (opt-in).
+      if (contextInspect) {
+        await emitContextInspect({ messages, tools, turn: iterations, enabled: true });
+      }
 
       const res = await this.driver.chat({ messages, tools });
       emit({ type: "assistant", content: res.content, toolCalls: res.toolCalls });

@@ -111,6 +111,15 @@ export interface OrchestratorOptions {
    * priors. Off by default; the run-from-env path enables it via TACHI_FORCE_SEARCH.
    */
   forceGrounding?: boolean;
+  /**
+   * Opt-in context inspector. When true, the orchestrator emits one JSONL
+   * `context_inspect` event to `.tachi/context-inspect/YYYY-MM-DD.jsonl` immediately
+   * before EVERY driver.chat call (one per ReAct turn), describing the assembled
+   * context layers and their token estimates. Off by default — the disabled path is
+   * byte-identical to before (no file writes). Can also be enabled via the
+   * TACHI_CONTEXT_INSPECT env var. Pure observability: never throws into the loop.
+   */
+  contextInspect?: boolean;
 }
 
 export interface RunResult {

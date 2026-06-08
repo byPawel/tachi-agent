@@ -15,3 +15,6 @@ docs/superpowers/plans/
 
 # planner accumulator cache (written into cwd by the planner tools)
 .plan-cache/
+
+# context-inspector JSONL output (written into cwd when TACHI_CONTEXT_INSPECT is on)
+.tachi/
