@@ -6,12 +6,33 @@ describe("DEFAULT_ALLOW (curated small allowlist)", () => {
     expect(DEFAULT_ALLOW).toContain("tachibot_jury");
     expect(DEFAULT_ALLOW).toContain("tachibot_tachi"); // smart router entry point
     expect(DEFAULT_ALLOW).toContain("tachibot_planner_maker"); // council planning
+    expect(DEFAULT_ALLOW).toContain("tachibot_grok_reason");
+    expect(DEFAULT_ALLOW).toContain("tachibot_grok_code");
+    expect(DEFAULT_ALLOW).toContain("tachibot_grok_debug");
+    expect(DEFAULT_ALLOW).toContain("tachibot_grok_architect");
+    expect(DEFAULT_ALLOW).toContain("tachibot_grok_brainstorm");
     expect(DEFAULT_ALLOW).toContain("tachibot_grok_search");
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_query");
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_brainstorm");
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_analyze_code");
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_analyze_text");
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_summarize");
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_judge");
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_search");
     expect(DEFAULT_ALLOW).toContain("tachibot_perplexity_ask");
+    expect(DEFAULT_ALLOW).toContain("tachibot_perplexity_research");
+    expect(DEFAULT_ALLOW).toContain("tachibot_perplexity_reason");
+    expect(DEFAULT_ALLOW).toContain("tachibot_perplexity_fact_check");
+    expect(DEFAULT_ALLOW).toContain("tachibot_perplexity_code_search");
+    expect(DEFAULT_ALLOW).toContain("tachibot_qwen_reason");
+    expect(DEFAULT_ALLOW).toContain("tachibot_qwen_general");
+    expect(DEFAULT_ALLOW).toContain("tachibot_qwen_coder");
+    expect(DEFAULT_ALLOW).toContain("tachibot_qwen_algo");
+    expect(DEFAULT_ALLOW).toContain("tachibot_qwen_competitive");
   });
 
-  it("drops single-model gemini_judge (subsumed by tachi/jury)", () => {
-    expect(DEFAULT_ALLOW).not.toContain("tachibot_gemini_judge");
+  it("keeps direct Gemini tools for explicit user routing", () => {
+    expect(DEFAULT_ALLOW).toContain("tachibot_gemini_judge");
   });
 
   it("does not add a non-existent tachibot_council tool", () => {
@@ -25,7 +46,7 @@ describe("DEFAULT_ALLOW (curated small allowlist)", () => {
     expect(DEFAULT_ALLOW).not.toContain("dokoro_dokoro_session_log");
   });
 
-  it("stays small — a 3–8B local model drowns past ~10 tools", () => {
-    expect(DEFAULT_ALLOW.length).toBeLessThanOrEqual(10);
+  it("stays bounded — a 3–8B local model drowns with the full tool surface", () => {
+    expect(DEFAULT_ALLOW.length).toBeLessThanOrEqual(35);
   });
 });

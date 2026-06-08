@@ -126,7 +126,7 @@ export interface RunResult {
   answer: string;
   iterations: number;
   toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }>;
-  haltedBy: "final-answer" | "max-iterations" | "timeout" | "aborted";
+  haltedBy: "final-answer" | "max-iterations" | "timeout" | "aborted" | "empty-response";
   /** Rough estimated USD spent on cloud tool calls this run (0 for purely local/memory tools). */
   costUsd: number;
 }

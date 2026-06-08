@@ -13,7 +13,7 @@ export function buildSynthesisPrompt(task: string, members: SwarmMember[]): stri
   return [
     `Synthesize ONE best answer to the task from the role perspectives below.`,
     `Resolve disagreements explicitly; keep what's correct, drop what the critic refutes.`,
-    `If the council tools (tachibot_council / tachibot_jury) are available, use them to adjudicate.`,
+    `If the council/router tools (tachibot_jury / tachibot_tachi) are available, use them to adjudicate.`,
     ``,
     `## Task`,
     task,

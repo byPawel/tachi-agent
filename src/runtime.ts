@@ -43,8 +43,29 @@ export const DEFAULT_ALLOW = [
   "tachibot_tachi",          // smart router → research/solve/architect/judge (single entry point)
   "tachibot_jury",           // multi-model panel + Gemini synthesis (non-trivial judgments)
   "tachibot_planner_maker",  // council-based planning (replaces the weak local planner)
+  "tachibot_grok_reason",    // direct Grok opinion/reasoning when the user explicitly asks Grok
+  "tachibot_grok_code",      // direct Grok coding specialist
+  "tachibot_grok_debug",     // direct Grok debugging specialist
+  "tachibot_grok_architect", // direct Grok architecture specialist
+  "tachibot_grok_brainstorm",// direct Grok ideation specialist
   "tachibot_grok_search",    // grounding search (entity/URL facts)
-  "tachibot_perplexity_ask", // grounding search fallback / research
+  "tachibot_gemini_query",        // direct Gemini general query
+  "tachibot_gemini_brainstorm",   // direct Gemini ideation specialist
+  "tachibot_gemini_analyze_code", // direct Gemini code analysis
+  "tachibot_gemini_analyze_text", // direct Gemini text/document analysis
+  "tachibot_gemini_summarize",    // direct Gemini summarization
+  "tachibot_gemini_judge",        // direct Gemini judgment when explicitly requested
+  "tachibot_gemini_search",       // direct Gemini grounding/search
+  "tachibot_perplexity_ask",         // direct Perplexity Q&A / grounding fallback
+  "tachibot_perplexity_research",    // direct Perplexity deeper research
+  "tachibot_perplexity_reason",      // direct Perplexity reasoning
+  "tachibot_perplexity_fact_check",  // direct Perplexity fact checking
+  "tachibot_perplexity_code_search", // direct Perplexity code/API search
+  "tachibot_qwen_reason",      // direct Qwen reasoning
+  "tachibot_qwen_general",     // direct Qwen general query
+  "tachibot_qwen_coder",       // direct Qwen coding specialist
+  "tachibot_qwen_algo",        // direct Qwen algorithmic reasoning
+  "tachibot_qwen_competitive", // direct Qwen competitive-programming specialist
   // dokoro memory — REAL namespaced names. The dokoro package self-prefixes its
   // tools with `dokoro_`, and the ToolHost namespaces with the server name `dokoro`,
   // so they arrive double-prefixed: `dokoro_dokoro_session_recall`. DokoroMemory

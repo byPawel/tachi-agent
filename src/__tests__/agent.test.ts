@@ -65,6 +65,33 @@ describe("Orchestrator (the pluggable core)", () => {
     expect(res.answer).toBe("recovered");
   });
 
+  it("recovers from a transient EMPTY turn by nudging, instead of halting on the placeholder", async () => {
+    // Local-model flake: one blank turn (no tool calls, no content), then a real answer.
+    const driver = scriptDriver([
+      { content: "   ", toolCalls: [] }, // whitespace-only counts as empty
+      { content: "recovered answer", toolCalls: [] },
+    ]);
+    const res = await new Orchestrator(driver, fakeHost(), undefined).run("ask grok");
+    expect(res.answer).toBe("recovered answer");
+    expect(res.haltedBy).toBe("final-answer");
+    expect(res.iterations).toBe(2); // the nudge consumed one iteration
+  });
+
+  it("HALTs as empty-response after consecutive empty turns exhaust the nudge budget", async () => {
+    const driver = scriptDriver([{ content: "", toolCalls: [] }]); // always empty
+    const res = await new Orchestrator(driver, fakeHost(), undefined, { maxIterations: 10 }).run("go");
+    expect(res.haltedBy).toBe("empty-response");
+    expect(res.iterations).toBe(3); // 2 nudged retries, then the 3rd empty trips the cap
+    expect(res.answer).toBe("[halted: empty-response, no final answer produced]");
+  });
+
+  it("reports empty-response (not max-iterations) when the LAST allowed iteration is empty", async () => {
+    const driver = scriptDriver([{ content: "", toolCalls: [] }]);
+    const res = await new Orchestrator(driver, fakeHost(), undefined, { maxIterations: 1 }).run("go");
+    expect(res.haltedBy).toBe("empty-response"); // tail-end: honest signal, not swallowed into max-iterations
+    expect(res.iterations).toBe(1);
+  });
+
   it("works with NO memory (memory is optional)", async () => {
     const driver = scriptDriver([{ content: "direct answer", toolCalls: [] }]);
     const res = await new Orchestrator(driver, fakeHost(), undefined).run("hi");
