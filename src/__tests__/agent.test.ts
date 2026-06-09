@@ -177,7 +177,29 @@ describe("Orchestrator forceGrounding option", () => {
       parameters: { type: "object", properties: { query: { type: "string" } } },
     },
   ];
-  const searchHost = (call = vi.fn(async () => "SEARCH RESULTS")): ToolHost => ({ tools: () => SEARCH_TOOLS, call });
+  const PERPLEXITY_FIRST_SEARCH_TOOLS: AgentTool[] = [
+    {
+      name: "tachibot_perplexity_ask",
+      description: "perplexity grounding search",
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+    },
+    {
+      name: "tachibot_grok_search",
+      description: "grok grounding search",
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+    },
+  ];
+  const PERPLEXITY_ONLY_SEARCH_TOOLS: AgentTool[] = [
+    {
+      name: "tachibot_perplexity_ask",
+      description: "perplexity grounding search",
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+    },
+  ];
+  const searchHost = (call = vi.fn(async () => "SEARCH RESULTS"), tools = SEARCH_TOOLS): ToolHost => ({
+    tools: () => tools,
+    call,
+  });
   // A task the deterministic router does NOT classify as needing a search
   // (no URL, no "what/who is", no "search for/look up/tell me about").
   const PLAIN_TASK = "best hermes agent skills";
@@ -201,5 +223,41 @@ describe("Orchestrator forceGrounding option", () => {
       result: "SEARCH RESULTS",
     });
     expect(res.answer).toBe("grounded answer");
+  });
+
+  it("prefers Grok search for explicit Grok requests even when Perplexity is listed first", async () => {
+    const call = vi.fn(async () => "GROK RESULTS");
+    const driver = scriptDriver([{ content: "grounded answer", toolCalls: [] }]);
+    const task = "Use Grok to search for the OpenAI gremlin article";
+
+    const res = await new Orchestrator(
+      driver,
+      searchHost(call, PERPLEXITY_FIRST_SEARCH_TOOLS),
+      undefined,
+      { forceGrounding: true },
+    ).run(task);
+
+    expect(call).toHaveBeenCalledWith("tachibot_grok_search", { query: task }, undefined);
+    expect(res.toolCalls[0]).toMatchObject({ name: "tachibot_grok_search", result: "GROK RESULTS" });
+  });
+
+  it("does not silently fall back to Perplexity for explicit Grok requests when Grok search is unavailable", async () => {
+    const call = vi.fn(async () => "PERPLEXITY RESULTS");
+    const driver = scriptDriver([{ content: "Grok unavailable", toolCalls: [] }]);
+    const task = "Ask Grok to search for OpenAI goblins";
+
+    const res = await new Orchestrator(
+      driver,
+      searchHost(call, PERPLEXITY_ONLY_SEARCH_TOOLS),
+      undefined,
+      { forceGrounding: true },
+    ).run(task);
+
+    expect(call).not.toHaveBeenCalled();
+    expect(res.toolCalls[0]).toMatchObject({
+      name: "tachibot_grok_search",
+      args: { query: task },
+    });
+    expect(res.toolCalls[0].result).toContain("Grok search unavailable");
   });
 });

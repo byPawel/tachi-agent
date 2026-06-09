@@ -76,6 +76,16 @@ function lastAssistantText(messages: ChatMessage[]): string {
   return "";
 }
 
+function explicitlyRequestsGrok(task: string): boolean {
+  return /\b(?:grok|xai|x\.ai)\b/i.test(task);
+}
+
+function selectGroundingSearchTool(tools: AgentTool[], task: string): AgentTool | undefined {
+  const grokSearch = tools.find((t) => /grok_search$/.test(t.name));
+  if (explicitlyRequestsGrok(task)) return grokSearch;
+  return grokSearch ?? tools.find((t) => /perplexity_ask$/.test(t.name));
+}
+
 export class Orchestrator {
   constructor(
     private readonly driver: Driver,
@@ -98,7 +108,7 @@ export class Orchestrator {
     // so the model can't describe a named entity from (hallucinated) priors.
     let grounding = "";
     if (this.opts.forceGrounding || needsGroundingSearch(task)) {
-      const searchTool = tools.find((t) => /grok_search$|perplexity_ask$/.test(t.name));
+      const searchTool = selectGroundingSearchTool(tools, task);
       if (searchTool) {
         const result = await safe(() => this.host.call(searchTool.name, { query: task }, this.opts.signal), "");
         if (result) {
@@ -106,6 +116,11 @@ export class Orchestrator {
           toolCalls.push({ name: searchTool.name, args: { query: task }, result });
           this.opts.onEvent?.({ type: "tool-result", name: searchTool.name, result });
         }
+      } else if (explicitlyRequestsGrok(task)) {
+        const result = "[Grok search unavailable: the user explicitly requested Grok/XAI, but no tachibot_grok_search tool is exposed. Do not silently substitute Perplexity; say Grok is unavailable or adjust TACHI_ALLOW/config.]";
+        grounding = `\n\n--- Grounding search unavailable ---\n${result}`;
+        toolCalls.push({ name: "tachibot_grok_search", args: { query: task }, result });
+        this.opts.onEvent?.({ type: "tool-result", name: "tachibot_grok_search", result });
       }
     }
 
