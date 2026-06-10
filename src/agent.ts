@@ -97,6 +97,7 @@ export class Orchestrator {
   async run(task: string): Promise<RunResult> {
     const maxIterations = this.opts.maxIterations ?? 10;
     const timeoutMs = this.opts.timeoutMs ?? 120_000;
+    const maxEmptyTurns = this.opts.maxEmptyTurns ?? MAX_CONSECUTIVE_EMPTY;
     const deadline = Date.now() + timeoutMs;
     const tools = this.host.tools();
     const toolCalls: RunResult["toolCalls"] = [];
@@ -178,7 +179,7 @@ export class Orchestrator {
         // "empty-response" instead of emitting a misleading "final-answer" placeholder.
         if (!res.content?.trim()) {
           consecutiveEmpty++;
-          if (consecutiveEmpty > MAX_CONSECUTIVE_EMPTY || iterations >= maxIterations) {
+          if (consecutiveEmpty > maxEmptyTurns || iterations >= maxIterations) {
             haltedBy = "empty-response";
             break;
           }

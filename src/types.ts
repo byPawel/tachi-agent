@@ -112,6 +112,12 @@ export interface OrchestratorOptions {
    */
   forceGrounding?: boolean;
   /**
+   * How many consecutive blank turns the loop nudges through before halting as
+   * "empty-response". Default 2. Resolved from TACHI_MAX_EMPTY_TURNS by the
+   * runtime factory; explicit per-call options override.
+   */
+  maxEmptyTurns?: number;
+  /**
    * Opt-in context inspector. When true, the orchestrator emits one JSONL
    * `context_inspect` event to `.tachi/context-inspect/YYYY-MM-DD.jsonl` immediately
    * before EVERY driver.chat call (one per ReAct turn), describing the assembled

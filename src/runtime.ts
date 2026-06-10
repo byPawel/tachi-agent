@@ -112,12 +112,16 @@ export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentR
   // per-call options still override.
   const forceGrounding = /^(1|true|yes|on)$/i.test(process.env.TACHI_FORCE_SEARCH ?? "");
 
+  // TACHI_MAX_EMPTY_TURNS — empty-turn nudge budget factory default (fail-soft: bad value → unset → 2).
+  const rawEmpty = Number(process.env.TACHI_MAX_EMPTY_TURNS);
+  const maxEmptyTurns = Number.isFinite(rawEmpty) && rawEmpty >= 0 ? Math.floor(rawEmpty) : undefined;
+
   return {
     host,
     driver,
     memory,
     toolCount: host.tools().length,
-    orchestrator: (options) => new Orchestrator(driver, host, memory, { forceGrounding, ...options }),
+    orchestrator: (options) => new Orchestrator(driver, host, memory, { forceGrounding, maxEmptyTurns, ...options }),
     close: () => host.close(),
   };
 }
