@@ -194,6 +194,77 @@ const answer = await tachi.runAndWait("research X");
 
 See [docs/openclaw-bridge.md](docs/openclaw-bridge.md) for plugin/skill wiring.
 
+## Standalone mode — unattended operation
+
+The daemon is the standalone foundation: a persistent task queue, a worker that drains it,
+recurring schedules, per-task driver selection, outcome notifications, and a durable per-run
+event log. Run it under a process supervisor and it operates with nobody attached.
+
+### Run the daemon under a supervisor
+
+Run `node dist/daemon/index.js` under **launchd** (macOS `LaunchAgent` with `KeepAlive`) or
+**systemd** (`Restart=always`). The queue (`.tachi/queue.json`) is crash-safe: a task left
+`running` by a dead daemon is re-queued on restart with its spent attempt counted.
+
+### Queue work from outside (external cron)
+
+`POST /tasks` enqueues durable work — unlike `POST /runs`, a queued task survives restarts and
+retries with exponential backoff (default 3 attempts). External cron is the scheduler of record
+for anything calendar-driven you want outside the agent:
+
+```cron
+# crontab — nightly digest at 02:30, run on the OpenAI heart
+30 2 * * * curl -s -X POST -H "Authorization: Bearer $TACHI_TOKEN" -H "Content-Type: application/json" \
+  -d '{"task":"summarize yesterdays inbox and post to slack","driver":"openai"}' http://127.0.0.1:8787/tasks
+```
+
+### Recurring schedules (built in)
+
+For self-contained recurrence, the daemon also evaluates `.tachi/schedules.json`
+(`TACHI_SCHEDULES_FILE`) every `TACHI_SCHEDULES_POLL_MS` (default 30s) and enqueues due
+entries into the same queue:
+
+```json
+{
+  "schedules": [
+    { "id": "morning-digest", "task": "compile the morning digest", "driver": "openai", "kind": "daily", "at": "07:00" },
+    { "id": "poll", "task": "check the feed for updates", "kind": "every", "everyMinutes": 30 }
+  ]
+}
+```
+
+- `kind: "daily"` + `at: "HH:MM"` — fires once per day, the first tick at/after that local time.
+- `kind: "every"` + `everyMinutes: N` — fires immediately on first sight, then every N minutes.
+- The file is **yours**: it's re-read on every tick, so hand edits apply without a restart, and
+  the daemon never writes to it. Machine state (last-run times) lives in a separate
+  `.tachi/schedules-state.json`, so a restart doesn't re-fire a schedule that already ran.
+- Malformed entries are skipped with a stderr warning; a broken file never takes the daemon down.
+
+### Multi-heart: per-task drivers
+
+`TACHI_DRIVER` picks the daemon's default brain (`ollama` by default — local, private). A task's
+optional `"driver"` field overrides it **for that task only**: keep the local heart for
+interactive chat, and send a nightly heavy job to `"driver": "openai"` or `"openrouter"`.
+
+Selection is **explicit by design** — there is no automatic routing and no silent fallback. A
+task naming an unknown or unconfigured driver (e.g. `openai` without `OPENAI_API_KEY`) fails
+loudly: the actionable error is recorded on the task, normal retry/backoff applies, and the
+failed task stays inspectable in the queue.
+
+### Notifications
+
+Set `TACHI_NOTIFY` (e.g. `telegram:123456789,slack:C0123ABC`) and the worker pushes every task
+outcome — success or failure — to those targets, using the existing `TELEGRAM_BOT_TOKEN` /
+`SLACK_BOT_TOKEN`. The agent reaches out; you don't poll.
+
+### Inspecting state
+
+| Where | What |
+|---|---|
+| `GET /tasks`, `GET /tasks/:id` | live queue: status, attempts, driver, answer/error |
+| `.tachi/queue.json` | the queue on disk (survives restarts; readable JSON) |
+| `.tachi/runs/*.jsonl` | durable per-run event log (`TACHI_RUN_LOG_DIR`) — every step, append-only |
+
 ## Extending (without forking)
 
 ```ts
@@ -229,13 +300,20 @@ All configuration is via environment variables (e.g. in `.env`, loaded with `nod
 | `TACHI_MAX_TOOL_RESULT_CHARS` | `30000` | Truncate tool results before they reach the model context (`0` disables). |
 | `TACHI_CONTEXT_INSPECT` | off | `1` → emit per-turn context JSONL to `.tachi/context-inspect/`. |
 
-### Drivers (local brain)
+### Drivers
 | Variable | Default | Purpose |
 |---|---|---|
+| `TACHI_DRIVER` | `ollama` | Default brain by registered name: `ollama` \| `hermes` \| `openai` \| `openrouter`. A queued task's `driver` field overrides per task. |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama endpoint. |
 | `OLLAMA_MODEL` | `qwen2.5` | Local model name. |
 | `OLLAMA_NUM_CTX` | `8192` | Context window override. |
 | `HERMES_BASE_URL` / `HERMES_MODEL` / `HERMES_API_KEY` | unset | Optional Hermes (OpenAI-compatible) driver. |
+| `OPENAI_API_KEY` | unset | Required for the `openai` driver. |
+| `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible endpoint (include `/v1`). |
+| `OPENROUTER_API_KEY` | unset | Required for the `openrouter` driver. |
+| `OPENROUTER_MODEL` | `openrouter/auto` | OpenRouter model. |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter endpoint. |
 
 ### MCP servers
 | Variable | Default | Purpose |
@@ -260,6 +338,16 @@ All configuration is via environment variables (e.g. in `.env`, loaded with `nod
 | `TACHI_SESSION_BUFFER_MAX` | `10000` | Per-run SSE replay ring-buffer cap. |
 | `TACHI_DRAIN_TIMEOUT_MS` | `30000` | Hard upper bound on graceful-shutdown drain. |
 | `TACHI_DEBUG` | off | Verbose stderr diagnostics. |
+
+### Standalone (queue · schedules · notifications)
+| Variable | Default | Purpose |
+|---|---|---|
+| `TACHI_QUEUE_FILE` | `.tachi/queue.json` | Persistent task-queue file (atomic writes; crash-safe). |
+| `TACHI_QUEUE_POLL_MS` | `2000` | Worker poll cadence over the queue. |
+| `TACHI_RUN_LOG_DIR` | `.tachi/runs` | Durable per-run JSONL event log directory. |
+| `TACHI_NOTIFY` | unset | Outcome push targets: comma-separated `kind:target`, e.g. `telegram:123,slack:C0ABC`. |
+| `TACHI_SCHEDULES_FILE` | `.tachi/schedules.json` | Human-edited recurring-schedule definitions (state kept separately in `…-state.json`). |
+| `TACHI_SCHEDULES_POLL_MS` | `30000` | Schedule evaluation cadence. |
 
 ### Swarm
 | Variable | Default | Purpose |
