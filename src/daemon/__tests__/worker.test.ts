@@ -58,6 +58,24 @@ describe("worker tick", () => {
     expect(queue.list()[0].status).toBe("queued"); // untouched
   });
 
+  it("passes the claimed task's driver to runTask (explicit multi-heart)", async () => {
+    const queue = await openQueue();
+    queue.enqueue("cloud job", { driver: "openai" });
+    queue.enqueue("local job");
+    const seen: Array<{ task: string; driver?: string }> = [];
+    const worker = createWorker({
+      queue,
+      runTask: async (task, driver) => { seen.push({ task, driver }); return { answer: "ok", haltedBy: "final-answer" }; },
+    });
+
+    await worker.tick();
+    await worker.tick();
+    expect(seen).toEqual([
+      { task: "cloud job", driver: "openai" },
+      { task: "local job", driver: undefined },
+    ]);
+  });
+
   it("treats a halted (non-final-answer) run as a failure so it retries", async () => {
     const queue = await openQueue();
     const t = queue.enqueue("slow", { maxAttempts: 1 });

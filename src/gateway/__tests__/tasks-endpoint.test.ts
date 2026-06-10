@@ -52,6 +52,25 @@ describe("/tasks endpoints", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("POST /tasks with a driver stores it; GET /tasks/:id and the list show it", async () => {
+    const res = await fetch(`${base}/tasks`, { method: "POST", headers: auth, body: JSON.stringify({ task: "cloud job", driver: "openai" }) });
+    expect(res.status).toBe(202);
+    const { task_id } = (await res.json()) as { task_id: string };
+
+    const one = await fetch(`${base}/tasks/${task_id}`, { headers: auth });
+    expect(((await one.json()) as any).driver).toBe("openai");
+
+    const list = await fetch(`${base}/tasks`, { headers: auth });
+    const entry = ((await list.json()) as any).tasks.find((x: any) => x.id === task_id);
+    expect(entry.driver).toBe("openai");
+  });
+
+  it("POST /tasks with a non-string driver → 400", async () => {
+    const res = await fetch(`${base}/tasks`, { method: "POST", headers: auth, body: JSON.stringify({ task: "bad", driver: 123 }) });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error).toBe("driver must be a string");
+  });
+
   it("without a queue configured, /tasks is 404 (bare gateway unchanged)", async () => {
     const bare = createGatewayServer(fakeRuntime, { env: { GATEWAY_TOKEN: "t" } });
     await new Promise<void>((r) => bare.listen(0, r));

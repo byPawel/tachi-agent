@@ -25,6 +25,12 @@ export interface QueueTask {
   updatedAt: number;
   /** Epoch ms before which a queued retry may not be claimed. */
   notBefore: number;
+  /**
+   * Explicit per-task brain ("multi-heart"): the registered driver name to run
+   * this task with (e.g. "openai"). Absent → the daemon's default (TACHI_DRIVER).
+   * Unknown/unavailable drivers fail LOUDLY at run time — no silent fallback.
+   */
+  driver?: string;
   answer?: string;
   error?: string;
 }
@@ -59,7 +65,7 @@ export class TaskQueue {
     return q;
   }
 
-  enqueue(task: string, opts: { maxAttempts?: number } = {}): QueueTask {
+  enqueue(task: string, opts: { maxAttempts?: number; driver?: string } = {}): QueueTask {
     const t: QueueTask = {
       id: randomUUID(),
       task,
@@ -69,6 +75,7 @@ export class TaskQueue {
       createdAt: this.now(),
       updatedAt: this.now(),
       notBefore: 0,
+      ...(opts.driver !== undefined ? { driver: opts.driver } : {}),
     };
     this.tasks.push(t);
     return t;

@@ -162,15 +162,24 @@ export function createGatewayServer(
             typeof body.maxAttempts === "number" && body.maxAttempts >= 1
               ? Math.floor(body.maxAttempts)
               : undefined;
-          const record = queue.enqueue(task, { maxAttempts });
+          // Per-task driver (multi-heart) — explicit opt-in; validated here, resolved
+          // (and failed loudly if unknown) by the worker at run time.
+          let driver: string | undefined;
+          if (body.driver !== undefined) {
+            if (typeof body.driver !== "string" || !body.driver.trim()) {
+              return json(res, 400, { error: "driver must be a string" });
+            }
+            driver = body.driver.trim();
+          }
+          const record = queue.enqueue(task, { maxAttempts, driver });
           await queue.flush().catch((e) => console.error("[gateway] queue flush error:", e));
           return json(res, 202, { task_id: record.id, status: record.status });
         }
 
         // GET /tasks  → list (id/status/attempts summaries)
         if (req.method === "GET" && parts.length === 1) {
-          const tasks = queue.list().map(({ id, status, attempts, maxAttempts, createdAt, updatedAt }) => ({
-            id, status, attempts, maxAttempts, createdAt, updatedAt,
+          const tasks = queue.list().map(({ id, status, attempts, maxAttempts, createdAt, updatedAt, driver }) => ({
+            id, status, attempts, maxAttempts, createdAt, updatedAt, driver,
           }));
           return json(res, 200, { tasks });
         }

@@ -11,8 +11,13 @@ import type { RunResult } from "../types.js";
 
 export interface WorkerDeps {
   queue: TaskQueue;
-  /** Execute one task to completion (the daemon binds this to runtime.orchestrator(...).run). */
-  runTask: (task: string) => Promise<Pick<RunResult, "answer" | "haltedBy">>;
+  /**
+   * Execute one task to completion (the daemon binds this to runtime.orchestrator(...).run).
+   * `driver` is the task's explicit per-task brain (multi-heart) — when set, the daemon
+   * resolves that registered driver for this run only; an unknown name throws, which the
+   * worker records as a normal failure (fail loudly, no silent fallback).
+   */
+  runTask: (task: string, driver?: string) => Promise<Pick<RunResult, "answer" | "haltedBy">>;
   /** Push an outcome to the humans (TACHI_NOTIFY targets). Optional. */
   notify?: (text: string) => Promise<void>;
   /** Poll cadence for start(). Default 2000ms (TACHI_QUEUE_POLL_MS in the daemon). */
@@ -41,7 +46,7 @@ export function createWorker(deps: WorkerDeps): Worker {
     const t = deps.queue.claim();
     if (!t) return false;
     try {
-      const res = await deps.runTask(t.task);
+      const res = await deps.runTask(t.task, t.driver);
       if (res.haltedBy === "final-answer") {
         deps.queue.complete(t.id, res.answer);
         await deps.queue.flush();

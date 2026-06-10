@@ -60,6 +60,19 @@ describe("TaskQueue", () => {
     expect(q2.claim()?.id).toBe(t.id);
   });
 
+  it("persists the per-task driver through enqueue → flush → open", async () => {
+    const q1 = await TaskQueue.open({ file, now: () => 1000 });
+    const withDriver = q1.enqueue("nightly digest", { driver: "openai" });
+    const without = q1.enqueue("local chat");
+    expect(withDriver.driver).toBe("openai");
+    expect(without.driver).toBeUndefined();
+    await q1.flush();
+
+    const q2 = await TaskQueue.open({ file, now: () => 2000 });
+    expect(q2.get(withDriver.id)?.driver).toBe("openai");
+    expect(q2.get(without.id)?.driver).toBeUndefined();
+  });
+
   it("claims in FIFO order and skips not-yet-due retries", async () => {
     let now = 1000;
     const q = await TaskQueue.open({ file, now: () => now });
