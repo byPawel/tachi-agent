@@ -60,6 +60,7 @@ same hub without modifying it:
 - **L2 — front-ends** ✅ CLI, REPL, Telegram, Slack (Socket Mode), Claude Code via a thin `run_agent` MCP server, an HTTP/SSE **Gateway**, and the **OpenClaw bridge**.
 - **L2.5 — daemon** ✅ Long-running daemon (reuses the gateway) with thin-client **attach** and **session handoff** — durable monotonic event sequence, `Last-Event-ID` buffered replay, refcount-aware TTL/GC, and graceful drain. A `UnifiedClient` makes local and daemon execution interchangeable, so every front-end swaps a single constructor with no behavior change.
 - **L3 — swarm** ✅ Fan out N role-specialized agents (varied prompts/drivers) in parallel on one task, then synthesize via a dedicated synthesizer agent (which can call `tachibot_council` / `tachibot_jury`). Bounded concurrency, quorum warnings, and per-member isolated dokoro sessions. See [Swarm](#swarm).
+- **L4 — standalone** ✅ Persistent task queue + worker, recurring schedules, per-task multi-heart drivers (`TACHI_DRIVER` with `ollama`/`hermes`/`openai`/`openrouter`), proactive Telegram/Slack notifications, durable per-run event logs, and CLI visibility subcommands. See [Standalone mode](#standalone-mode--unattended-operation).
 
 ## Develop
 
@@ -87,6 +88,19 @@ node dist/cli.js "verify HEAD against ADR-1..3"
 ```
 
 Ctrl-C stops the run cleanly (`AbortSignal` → halts with `aborted`). Progress streams to **stderr**; the final answer prints to **stdout**.
+
+### Install the `tachi-agent` command
+
+```bash
+# from this repo (no registry needed)
+npm install && npm run build && npm link
+
+tachi-agent "verify HEAD against ADR-1..3"   # run a task directly
+tachi-agent task list                         # queue visibility (needs TACHI_DAEMON_URL + GATEWAY_TOKEN)
+tachi-agent runs log <run-id>                 # inspect a run's durable event log
+```
+
+`npm link` (or, once published, `npm i -g tachi-agent`) puts all eight binaries on your PATH: `tachi-agent`, `tachi-agent-daemon`, `tachi-agent-mcp`, `tachi-agent-gateway`, `tachi-agent-telegram`, `tachi-agent-slack`, `tachi-agent-repl`, `tachi-agent-swarm`.
 
 ## Swarm
 

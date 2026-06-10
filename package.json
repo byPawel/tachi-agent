@@ -1,6 +1,6 @@
 {
   "name": "tachi-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local-first orchestration agent — a pluggable ReAct hub that fuses dokoro memory + tachibot multi-model council over MCP. Default brain runs 100% local (Qwen2.5/Ollama).",
   "type": "module",
   "license": "MIT",
@@ -20,8 +20,14 @@
   "files": [
     "dist"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/byPawel/tachi-agent.git"
+  },
+  "homepage": "https://bypawel.github.io/tachi-agent/",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
