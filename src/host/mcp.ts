@@ -176,10 +176,12 @@ export class McpToolHost implements ToolHost {
     } catch (e) {
       // A dead child process surfaces as a bare "Connection closed"/"Not connected" —
       // rewrite it so the model (and the user) see WHICH server died and what to do.
+      // NO `Tool "X" failed:` lead-in: the orchestrator's dispatch already wraps host
+      // errors as `[tool "X" failed: …]`, so a prefix here would double up.
       const msg = e instanceof Error ? e.message : String(e);
       if (isDisconnectError(msg)) {
         throw new Error(
-          `Tool "${name}" failed: MCP server "${server}" disconnected (${msg}). ` +
+          `MCP server "${server}" disconnected (${msg}). ` +
           `The server child process likely exited; restart the agent to reconnect.`,
         );
       }

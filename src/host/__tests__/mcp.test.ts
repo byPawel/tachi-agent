@@ -179,18 +179,28 @@ describe("McpToolHost.call when the MCP server child process has died", () => {
     };
   }
 
-  it("rewrites 'Connection closed' into an actionable error naming the tool and server", async () => {
+  it("rewrites 'Connection closed' into an actionable error naming the server", async () => {
     const host = hostWith("tachibot", deadClient("MCP error -32000: Connection closed"));
     await expect(host.call("tachibot_jury", { q: "x" })).rejects.toThrow(
-      /tool "tachibot_jury".*server "tachibot" disconnected/i,
+      /server "tachibot" disconnected/i,
     );
+  });
+
+  it("does NOT prefix the rewrite with 'Tool \"X\" failed:' (dispatch adds the only wrapper — no double prefix)", async () => {
+    // The orchestrator's dispatch wraps host errors as `[tool "X" failed: <message>]`;
+    // if the rewrite carried its own `Tool "X" failed:` lead-in, the model would see
+    // `[tool "X" failed: Tool "X" failed: MCP server …]`.
+    const host = hostWith("tachibot", deadClient("MCP error -32000: Connection closed"));
+    const err = await host.call("tachibot_jury", {}).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/^MCP server "tachibot" disconnected/);
+    expect((err as Error).message).not.toMatch(/tool "tachibot_jury" failed/i);
   });
 
   it("rewrites 'Not connected' the same way and preserves the original message", async () => {
     const host = hostWith("dokoro", deadClient("Not connected"));
     const err = await host.call("dokoro_dokoro_session_recall", {}).catch((e: Error) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toMatch(/server "dokoro" disconnected/i);
+    expect((err as Error).message).toMatch(/^MCP server "dokoro" disconnected/);
     expect((err as Error).message).toContain("Not connected");
   });
 
