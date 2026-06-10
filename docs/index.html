@@ -20,6 +20,7 @@
         <li><a href="index.html">Home</a></li>
         <li><a href="architecture.html">Architecture</a></li>
         <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="standalone.html">Standalone</a></li>
         <li><a href="deploy.html">Deploy</a></li>
         <li><a href="get-started.html">Get started</a></li>
         <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
@@ -39,7 +40,9 @@
             A small, pluggable ReAct hub that fuses <strong><a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a></strong> (persistent memory)
             with <strong><a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a></strong> (multi-model council) over MCP. The default brain runs
             <strong>100% local</strong> — Qwen2.5 via Ollama — so multi-model reasoning runs
-            entirely <em>offline</em>: no API keys, no cloud cost.
+            entirely <em>offline</em>: no API keys, no cloud cost. Run it interactively — or as an
+            <strong><a href="standalone.html">unattended daemon</a></strong> with a persistent queue,
+            recurring schedules, and per-task hearts.
           </p>
           <div class="cta-row hero-anim d5">
             <a class="btn btn-primary" href="get-started.html">Get started →</a>
@@ -100,9 +103,11 @@
             <span class="card-tag">the brain</span>
             <h3>Driver</h3>
             <p>
-              Default: <strong>Qwen2.5 / Ollama</strong>, fully local. Swap via
-              <code>registerDriver</code> to Hermes (OpenAI-compatible), a cloud model,
-              OpenClaw, or a Kimi swarm. One interface, any brain.
+              Default: <strong>Qwen2.5 / Ollama</strong>, fully local. Pick a heart with
+              <code>TACHI_DRIVER</code> — <code>ollama</code> · <code>hermes</code> ·
+              <code>openai</code> · <code>openrouter</code> — or register your own via
+              <code>registerDriver</code>. Each <a href="standalone.html">queued task</a> can
+              carry its own driver. One interface, any brain.
             </p>
           </article>
 
@@ -163,11 +168,17 @@
             <h4>Long-running, attachable</h4>
             <p>A daemon reusing the gateway with thin-client attach, session handoff, durable event sequence, buffered replay, refcount-aware TTL/GC, and graceful drain.</p>
           </li>
-          <li class="new">
-            <span class="tl-tag">L3 — swarm</span><span class="tl-state">✅ new</span>
+          <li class="done">
+            <span class="tl-tag">L3 — swarm</span><span class="tl-state">✅ shipped</span>
             <h4>Fan out, then synthesize</h4>
             <p>N role-specialized agents run one task in parallel, then a synthesizer merges their answers. Bounded concurrency, quorum warnings, per-member memory isolation.</p>
             <p><a href="swarm.html">Read the Swarm page →</a></p>
+          </li>
+          <li class="new">
+            <span class="tl-tag">L4 — standalone</span><span class="tl-state">✅ new</span>
+            <h4>Unattended operation</h4>
+            <p>A crash-safe persistent task queue with retry/backoff, recurring schedules from a hand-edited JSON file, per-task multi-heart drivers (<code>ollama</code> · <code>hermes</code> · <code>openai</code> · <code>openrouter</code>), outcome notifications to Telegram/Slack, durable per-run JSONL logs, and queue/run-log CLI commands.</p>
+            <p><a href="standalone.html">Read the Standalone page →</a></p>
           </li>
         </ol>
       </div>
@@ -181,6 +192,7 @@
       <div class="footer-links">
         <a href="architecture.html">Architecture</a>
         <a href="swarm.html">Swarm</a>
+        <a href="standalone.html">Standalone</a>
         <a href="deploy.html">Deploy</a>
         <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
       </div>

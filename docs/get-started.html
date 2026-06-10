@@ -20,6 +20,7 @@
         <li><a href="index.html">Home</a></li>
         <li><a href="architecture.html">Architecture</a></li>
         <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="standalone.html">Standalone</a></li>
         <li><a href="deploy.html">Deploy</a></li>
         <li><a href="get-started.html">Get started</a></li>
         <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
@@ -113,6 +114,7 @@ node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
             <li><strong>HTTP / SSE Gateway</strong> — async jobs + streamed events.</li>
             <li><strong>OpenClaw bridge</strong> — delegate over the gateway with <code>GatewayClient</code>.</li>
             <li><strong>Swarm</strong> — fan-out / synthesize bin: <code>npm run swarm</code>.</li>
+            <li><strong>Standalone daemon</strong> — unattended queue + schedules + notifications: <code>node dist/daemon/index.js</code> under launchd / systemd — <a href="standalone.html">Standalone page</a>.</li>
           </ul>
         </div>
       </div>
@@ -132,6 +134,7 @@ node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
               <tr><th>Variable</th><th>What it does</th></tr>
             </thead>
             <tbody>
+              <tr><td><code>TACHI_DRIVER</code></td><td>Default brain by registered name: <code>ollama</code> (default, local) · <code>hermes</code> · <code>openai</code> · <code>openrouter</code>. A queued task's <code>driver</code> field overrides per task.</td></tr>
               <tr><td><code>OLLAMA_BASE_URL</code></td><td>Ollama endpoint for the local brain (defaults to <code>127.0.0.1</code>).</td></tr>
               <tr><td><code>OLLAMA_MODEL</code></td><td>Local model id, e.g. <code>qwen2.5</code>.</td></tr>
               <tr><td><code>TACHIBOT_CMD</code></td><td>Command to launch the <a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a> MCP server (council tools).</td></tr>
@@ -139,8 +142,13 @@ node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
               <tr><td><code>TACHI_ALLOW</code></td><td>Tool allowlist — restricts which namespaced tools the agent may call.</td></tr>
               <tr><td><code>TACHI_SWARM_ROLES</code></td><td>Comma-separated roles for the swarm; <code>name</code> or <code>name:driver</code>; empty = defaults.</td></tr>
               <tr><td><code>GATEWAY_TOKEN</code> / <code>GATEWAY_PORT</code></td><td>Bearer token and port for the HTTP/SSE gateway.</td></tr>
+              <tr><td><code>TACHI_MAX_TOOL_RESULT_CHARS</code></td><td>Truncate tool results before they reach the model context — defaults to <code>30000</code>; <code>0</code> disables.</td></tr>
+              <tr><td><code>TACHI_MAX_EMPTY_TURNS</code></td><td>Consecutive blank model turns nudged through before halting as <code>empty-response</code> (default <code>2</code>).</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="prose">
+          <p>The standalone surface — queue, schedules, drivers, notifications, run logs (<code>TACHI_QUEUE_FILE</code>, <code>TACHI_SCHEDULES_FILE</code>, <code>TACHI_NOTIFY</code>, <code>TACHI_RUN_LOG_DIR</code>, …) — lives on the <a href="standalone.html">Standalone page</a>.</p>
         </div>
       </div>
     </section>
@@ -195,6 +203,7 @@ registerDriver(<span class="s">"hermes"</span>, () =&gt; <span class="k">new</sp
       <div class="footer-links">
         <a href="index.html">Home</a>
         <a href="architecture.html">Architecture</a>
+        <a href="standalone.html">Standalone</a>
         <a href="deploy.html">Deploy</a>
         <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
       </div>

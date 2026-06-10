@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Standalone — tachi-agent</title>
+  <meta name="description" content="Standalone mode: a long-running daemon with a persistent task queue, recurring schedules, per-task multi-heart drivers, outcome notifications, durable run logs, and CLI visibility — unattended operation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="wordmark" href="index.html"><span class="kanji">太刀</span> tachi-agent</a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="standalone.html">Standalone</a></li>
+        <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="get-started.html">Get started</a></li>
+        <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow hero-anim d1">// unattended operation</p>
+      <h1 class="hero-anim d2"><span class="accent">Standalone.</span> It runs with nobody attached.</h1>
+      <p class="hero-sub hero-anim d3">
+        The daemon is the standalone foundation: a <strong>persistent task queue</strong>, a worker
+        that drains it, <strong>recurring schedules</strong>, per-task <strong>driver selection</strong>,
+        outcome <strong>notifications</strong>, and a durable per-run <strong>event log</strong>.
+        Run it under a process supervisor and it operates <em>unattended</em>.
+      </p>
+      <div class="cta-row hero-anim d5">
+        <a class="btn btn-primary" href="#queue">Queue work →</a>
+        <a class="btn" href="#drivers">Multi-heart drivers</a>
+        <a class="btn" href="architecture.html">Architecture</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== THE FOUNDATION ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">01</span>
+          <span class="sec-kicker"><span class="box">┌─</span> the foundation</span>
+          <h2 class="sec-title">A daemon under a supervisor. A queue that survives it.</h2>
+        </div>
+        <div class="prose">
+          <p class="lede">
+            Run <code>node dist/daemon/index.js</code> under <strong>launchd</strong> (macOS
+            <code>LaunchAgent</code> with <code>KeepAlive</code>) or <strong>systemd</strong>
+            (<code>Restart=always</code>). The supervisor keeps the process alive; the queue keeps
+            the <em>work</em> alive.
+          </p>
+          <p>
+            The queue (<code>.tachi/queue.json</code>) is <strong>crash-safe</strong>: a task left
+            <code>running</code> by a dead daemon is re-queued on restart with its spent attempt
+            counted. Failed tasks retry with <strong>exponential backoff</strong> (default 3 attempts).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== QUEUE / EXTERNAL CRON ===================== -->
+    <section class="section reveal" id="queue">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">02</span>
+          <span class="sec-kicker"><span class="box">//</span> the queue</span>
+          <h2 class="sec-title">Queue work from outside. External cron is the scheduler.</h2>
+          <p class="sec-lead"><code>POST /tasks</code> enqueues <strong>durable</strong> work — unlike <code>POST /runs</code>, a queued task survives restarts and retries with backoff. External cron is the scheduler of record for anything calendar-driven you want outside the agent:</p>
+        </div>
+
+        <div class="code" data-lang="cron">
+          <div class="code-head">
+            <span class="code-label">crontab — nightly digest at 02:30, run on the OpenAI heart</span>
+            <button class="copy-btn" aria-label="Copy crontab entry to clipboard">copy</button>
+          </div>
+<pre><span class="c"># crontab — nightly digest at 02:30, run on the OpenAI heart</span>
+30 2 * * * curl -s -X POST -H <span class="s">"Authorization: Bearer $TACHI_TOKEN"</span> -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"task":"summarize yesterdays inbox and post to slack","driver":"openai"}'</span> http://127.0.0.1:8787/tasks</pre>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Method &amp; path</th><th>Purpose</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>POST /tasks</code><br /><span style="color:var(--muted);font-size:.85em">{task, driver?, maxAttempts?}</span></td>
+                <td>Enqueue a durable task — survives restarts, retries with exponential backoff.</td>
+              </tr>
+              <tr>
+                <td><code>GET /tasks</code></td>
+                <td>The live queue: status, attempts, driver, answer/error per task.</td>
+              </tr>
+              <tr>
+                <td><code>GET /tasks/:id</code></td>
+                <td>One task in full — including the recorded error after a loud failure.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== RECURRING SCHEDULES ===================== -->
+    <section class="section reveal" id="schedules">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">03</span>
+          <span class="sec-kicker"><span class="box">┌─</span> recurring schedules</span>
+          <h2 class="sec-title">A JSON file you edit by hand. Re-read live.</h2>
+          <p class="sec-lead">For self-contained recurrence, the daemon also evaluates <code>.tachi/schedules.json</code> (<code>TACHI_SCHEDULES_FILE</code>) every <code>TACHI_SCHEDULES_POLL_MS</code> (default 30s) and enqueues due entries into the same queue:</p>
+        </div>
+
+        <div class="code" data-lang="json">
+          <div class="code-head">
+            <span class="code-label">.tachi/schedules.json</span>
+            <button class="copy-btn" aria-label="Copy schedules JSON to clipboard">copy</button>
+          </div>
+<pre>{
+  <span class="s">"schedules"</span>: [
+    { <span class="s">"id"</span>: <span class="s">"morning-digest"</span>, <span class="s">"task"</span>: <span class="s">"compile the morning digest"</span>, <span class="s">"driver"</span>: <span class="s">"openai"</span>, <span class="s">"kind"</span>: <span class="s">"daily"</span>, <span class="s">"at"</span>: <span class="s">"07:00"</span> },
+    { <span class="s">"id"</span>: <span class="s">"poll"</span>, <span class="s">"task"</span>: <span class="s">"check the feed for updates"</span>, <span class="s">"kind"</span>: <span class="s">"every"</span>, <span class="s">"everyMinutes"</span>: 30 }
+  ]
+}</pre>
+        </div>
+
+        <div class="prose">
+          <ul>
+            <li><strong><code>kind: "daily"</code></strong> + <code>at: "HH:MM"</code> — fires once per day, the first tick at/after that local time.</li>
+            <li><strong><code>kind: "every"</code></strong> + <code>everyMinutes: N</code> — fires immediately on first sight, then every N minutes.</li>
+            <li><strong>The file is yours.</strong> It's re-read on every tick, so hand edits apply without a restart, and the daemon never writes to it. Machine state (last-run times) lives in a separate <code>.tachi/schedules-state.json</code>, so a restart doesn't re-fire a schedule that already ran.</li>
+            <li><strong>Fault-tolerant.</strong> Malformed entries are skipped with a stderr warning; a broken file never takes the daemon down.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== MULTI-HEART DRIVERS ===================== -->
+    <section class="section reveal" id="drivers">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">04</span>
+          <span class="sec-kicker"><span class="box">//</span> multi-heart</span>
+          <h2 class="sec-title">One default brain. A different heart per task.</h2>
+          <p class="sec-lead"><code>TACHI_DRIVER</code> picks the daemon's default brain (<code>ollama</code> by default — local, private). A task's optional <code>"driver"</code> field overrides it <strong>for that task only</strong>: keep the local heart for interactive chat, and send a nightly heavy job to <code>"driver": "openai"</code> or <code>"openrouter"</code>.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Driver</th><th>What it is</th><th>Needs</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>ollama</code></td><td>Local model via Ollama — private, offline. The default.</td><td>—</td></tr>
+              <tr><td><code>hermes</code></td><td>Self-hosted OpenAI-compatible endpoint.</td><td><code>HERMES_BASE_URL</code> / <code>HERMES_MODEL</code></td></tr>
+              <tr><td><code>openai</code></td><td>GPT via the OpenAI API.</td><td><code>OPENAI_API_KEY</code></td></tr>
+              <tr><td><code>openrouter</code></td><td>Any model behind OpenRouter.</td><td><code>OPENROUTER_API_KEY</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — local heart by default, GPT for the nightly job</span>
+            <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
+          </div>
+<pre><span class="c"># the daemon's default heart stays local</span>
+<span class="k">export</span> TACHI_DRIVER=ollama
+
+<span class="c"># this one task runs on GPT — for that task only</span>
+curl -s -X POST -H <span class="s">"Authorization: Bearer $TACHI_TOKEN"</span> -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"task":"deep-audit the quarter logs","driver":"openai"}'</span> http://127.0.0.1:8787/tasks</pre>
+        </div>
+
+        <div class="cards">
+          <article class="card" data-num="01">
+            <span class="card-tag">explicit by design</span>
+            <h3>No silent fallback</h3>
+            <p>
+              There is <strong>no automatic routing</strong> and no silent substitution. A task
+              naming an unknown or unconfigured driver (e.g. <code>openai</code> without
+              <code>OPENAI_API_KEY</code>) <strong>fails loudly</strong>: the actionable error is
+              recorded on the task, normal retry/backoff applies, and the failed task stays
+              inspectable in the queue.
+            </p>
+          </article>
+          <article class="card" data-num="02">
+            <span class="card-tag">division of labor</span>
+            <h3>Hearts ≠ council ≠ memory</h3>
+            <p>
+              The driver is the <em>heart</em> that runs the loop. Decision-making stays with the
+              <strong><a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a></strong>
+              multi-model council tools; persistent memory stays
+              <strong><a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a></strong>.
+              Swapping the heart changes none of that.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== NOTIFICATIONS ===================== -->
+    <section class="section reveal" id="notify">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">05</span>
+          <span class="sec-kicker"><span class="box">┌─</span> notifications</span>
+          <h2 class="sec-title">The agent reaches out. You don't poll.</h2>
+        </div>
+        <div class="prose">
+          <p class="lede">
+            Set <code>TACHI_NOTIFY</code> and the worker pushes <strong>every task outcome</strong> —
+            success or failure — to those targets, using the existing
+            <code>TELEGRAM_BOT_TOKEN</code> / <code>SLACK_BOT_TOKEN</code>.
+          </p>
+        </div>
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — push outcomes to Telegram + Slack</span>
+            <button class="copy-btn" aria-label="Copy command to clipboard">copy</button>
+          </div>
+<pre><span class="k">export</span> TACHI_NOTIFY=<span class="s">"telegram:123456789,slack:C0123ABC"</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== INSPECTING STATE ===================== -->
+    <section class="section reveal" id="inspect">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">06</span>
+          <span class="sec-kicker"><span class="box">//</span> inspecting state</span>
+          <h2 class="sec-title">Everything an unattended run did, on disk.</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Where</th><th>What</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>GET /tasks</code>, <code>GET /tasks/:id</code></td><td>Live queue: status, attempts, driver, answer/error.</td></tr>
+              <tr><td><code>.tachi/queue.json</code></td><td>The queue on disk (survives restarts; readable JSON).</td></tr>
+              <tr><td><code>.tachi/runs/*.jsonl</code></td><td>Durable per-run event log (<code>TACHI_RUN_LOG_DIR</code>) — every step, append-only. Post-hoc debugging for runs nobody watched.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="prose">
+          <p class="lede">
+            The same visibility from the CLI — point it at the daemon with
+            <code>TACHI_DAEMON_URL</code> + <code>GATEWAY_TOKEN</code>:
+          </p>
+        </div>
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — queue + run-log CLI</span>
+            <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
+          </div>
+<pre><span class="k">export</span> TACHI_DAEMON_URL=<span class="s">"http://127.0.0.1:8787"</span> GATEWAY_TOKEN=<span class="s">"change-me"</span>
+
+tachi-agent task add <span class="s">"compile the weekly report"</span> --driver openai --max-attempts 5
+tachi-agent task list            <span class="c"># id · status · attempt n/max · driver · excerpt</span>
+tachi-agent task show &lt;id&gt;       <span class="c"># one task in full — answer or recorded error</span>
+tachi-agent runs log &lt;run-id&gt;    <span class="c"># replay the durable JSONL event log of a run</span></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP · <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a> · <a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a></div>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="deploy.html">Deploy</a>
+        <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="footer-mark" aria-hidden="true">太刀</div>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

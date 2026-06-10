@@ -20,6 +20,7 @@
         <li><a href="index.html">Home</a></li>
         <li><a href="architecture.html">Architecture</a></li>
         <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="standalone.html">Standalone</a></li>
         <li><a href="deploy.html">Deploy</a></li>
         <li><a href="get-started.html">Get started</a></li>
         <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
@@ -206,7 +207,7 @@
             <tbody>
               <tr>
                 <td><strong>Driver</strong><br /><span style="color:var(--muted);font-size:.85em">the brain</span></td>
-                <td>Change the brain via <code>registerDriver</code> — Hermes (OpenAI-compatible), a cloud model, OpenClaw, or a Kimi swarm. Implement one <code>Driver</code> interface.</td>
+                <td>Pick a registered heart via <code>TACHI_DRIVER</code> — <code>ollama</code> · <code>hermes</code> · <code>openai</code> · <code>openrouter</code> — or register your own via <code>registerDriver</code> (a cloud model, OpenClaw, a Kimi swarm). A <a href="standalone.html">queued task's</a> <code>driver</code> field overrides per task. Implement one <code>Driver</code> interface.</td>
                 <td>local <strong>Qwen2.5 / Ollama</strong> (native <code>/api/chat</code>)</td>
               </tr>
               <tr>
@@ -511,6 +512,62 @@ dokoro_session_recall
         </div>
       </div>
     </section>
+
+    <!-- ===================== THE DAEMON ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">05</span>
+          <span class="sec-kicker"><span class="box">┌─</span> the daemon — standalone foundation</span>
+          <h2 class="sec-title">Around the hub: a daemon that owns the unattended machinery.</h2>
+          <p class="sec-lead">The hub stays a per-run unit. The <strong>daemon</strong> wraps it for unattended operation — it owns the queue, the worker, the schedules, the event log, and the notifiers. Drivers are <strong>pluggable hearts</strong> behind the registry: <code>TACHI_DRIVER</code> sets the default, each queued task can override it.</p>
+        </div>
+
+        <div class="cards">
+          <article class="card" data-num="01">
+            <span class="card-tag">durable work</span>
+            <h3>Queue + worker</h3>
+            <p>
+              A persistent, crash-safe task queue (<code>.tachi/queue.json</code>) and a worker
+              that drains it. Interrupted tasks re-queue on restart; failures retry with
+              exponential backoff. <code>POST /tasks</code> enqueues from outside.
+            </p>
+          </article>
+          <article class="card" data-num="02">
+            <span class="card-tag">recurrence</span>
+            <h3>Schedules</h3>
+            <p>
+              A hand-edited <code>.tachi/schedules.json</code> (<code>daily</code> at HH:MM or
+              <code>every</code> N minutes), re-read live each tick; machine state kept in a
+              separate <code>-state.json</code>. Due entries feed the same queue.
+            </p>
+          </article>
+          <article class="card" data-num="03">
+            <span class="card-tag">pluggable hearts</span>
+            <h3>Driver registry</h3>
+            <p>
+              <code>TACHI_DRIVER</code> picks the default brain — <code>ollama</code> ·
+              <code>hermes</code> · <code>openai</code> · <code>openrouter</code> — and a task's
+              <code>driver</code> field overrides it per task. Explicit selection only:
+              an unavailable heart fails the task loudly, never silently substitutes.
+            </p>
+          </article>
+          <article class="card" data-num="04">
+            <span class="card-tag">observability</span>
+            <h3>Event log + notifiers</h3>
+            <p>
+              Every run appends to a durable JSONL log in <code>.tachi/runs/</code>, and
+              <code>TACHI_NOTIFY</code> pushes each task outcome to Telegram / Slack — the
+              record and the ping for runs nobody watched.
+            </p>
+          </article>
+        </div>
+
+        <div class="prose">
+          <p><a href="standalone.html">Read the Standalone page →</a></p>
+        </div>
+      </div>
+    </section>
   </main>
 
   <!-- ===================== FOOTER ===================== -->
@@ -520,6 +577,7 @@ dokoro_session_recall
       <div class="footer-links">
         <a href="index.html">Home</a>
         <a href="swarm.html">Swarm</a>
+        <a href="standalone.html">Standalone</a>
         <a href="deploy.html">Deploy</a>
         <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
