@@ -37,10 +37,13 @@
           <div class="hero-wordmark hero-anim d1"><span class="kanji">太刀</span> tachi-agent</div>
           <h1 class="hero-anim d2">A <span class="accent">local-first</span> orchestration agent.</h1>
           <p class="hero-sub hero-anim d3">
+            <strong>tachi-agent — local-first agent runtime.</strong> <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">Dokoro</a> gives it memory. <a href="https://tachibot.com" target="_blank" rel="noopener">TachiBot</a> gives it better judgment. (TachiBot orchestrates models; tachi-agent orchestrates work.)
+          </p>
+          <p class="hero-sub hero-anim d3">
             A small, pluggable ReAct hub that fuses <strong><a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a></strong> (persistent memory)
             with <strong><a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a></strong> (multi-model council) over MCP. The default brain runs
             <strong>100% local</strong> — Qwen2.5 via Ollama — so multi-model reasoning runs
-            entirely <em>offline</em>: no API keys, no cloud cost. Run it interactively — or as an
+            entirely <em>offline</em>: no API keys, no cloud cost. Open an <strong>interactive chat session</strong> with bare <code>tachi-agent</code>, run skill bundles with <code>--skill &lt;name&gt;</code>, or deploy it as an
             <strong><a href="standalone.html">unattended daemon</a></strong> with a persistent queue,
             recurring schedules, and per-task hearts.
           </p>
@@ -138,6 +141,61 @@
       </div>
     </section>
 
+    <!-- ===================== INTERACTIVE CHAT + SKILLS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">//</span> interactive chat &amp; skills</span>
+          <h2 class="sec-title">A REPL by default. Skill bundles on demand.</h2>
+          <p class="sec-lead">Bare <code>tachi-agent</code> opens an interactive chat session — no arguments needed. Unified <code>/commands</code> work across the REPL and Telegram. Point at a skill with <code>--skill &lt;name&gt;</code> to narrow the tool surface and prefill the system prompt.</p>
+        </div>
+
+        <div class="cards">
+          <article class="card" data-num="01">
+            <span class="card-tag">interactive chat</span>
+            <h3>REPL by default</h3>
+            <p>
+              Run bare <code>tachi-agent</code> to open a persistent chat session. The prompt shows the active state: <code>tachi [driver·skill] ›</code>. History persists at <code>~/.tachi-agent/repl_history</code>. Pass <code>--driver</code> or <code>--skill</code> to start configured.
+            </p>
+          </article>
+
+          <article class="card" data-num="02">
+            <span class="card-tag">skills / recipes</span>
+            <h3>Skill bundles</h3>
+            <p>
+              Drop a Markdown file in <code>.tachi/skills/</code> (or set <code>TACHI_SKILLS_DIR</code>). Frontmatter carries <code>name</code>, <code>description</code>, <code>tools</code> (allowlist), and <code>driver</code>. The body becomes the system prompt. See <code>examples/skills/</code> for ready-made recipes.
+            </p>
+          </article>
+
+          <article class="card" data-num="03">
+            <span class="card-tag">unified /commands</span>
+            <h3>Commands everywhere</h3>
+            <p>
+              <code>/help</code> · <code>/tools</code> · <code>/model</code> · <code>/status</code> · <code>/driver</code> · <code>/skill</code> · <code>/reset</code> · <code>/jury</code> · <code>/search</code> · <code>/think</code> · <code>/task</code> · <code>/schedule</code> · <code>/exit</code> — the same surface in the REPL and Telegram.
+            </p>
+          </article>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — chat quickstart</span>
+            <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
+          </div>
+<pre><span class="c"># open interactive chat (default — no args needed)</span>
+tachi-agent
+
+<span class="c"># start with a specific driver or skill</span>
+tachi-agent --driver openai
+tachi-agent --skill researcher <span class="s">"explain the CAP theorem trade-offs"</span>
+
+<span class="c"># inside the REPL</span>
+/skill repo-review
+/driver openai
+/jury <span class="s">"Is this design thread-safe?"</span></pre>
+        </div>
+      </div>
+    </section>
+
     <!-- ===================== ROADMAP ===================== -->
     <section class="section reveal">
       <div class="wrap">
@@ -174,11 +232,16 @@
             <p>N role-specialized agents run one task in parallel, then a synthesizer merges their answers. Bounded concurrency, quorum warnings, per-member memory isolation.</p>
             <p><a href="swarm.html">Read the Swarm page →</a></p>
           </li>
-          <li class="new">
-            <span class="tl-tag">L4 — standalone</span><span class="tl-state">✅ new</span>
+          <li class="done">
+            <span class="tl-tag">L4 — standalone</span><span class="tl-state">✅ shipped</span>
             <h4>Unattended operation</h4>
             <p>A crash-safe persistent task queue with retry/backoff, recurring schedules from a hand-edited JSON file, per-task multi-heart drivers (<code>ollama</code> · <code>hermes</code> · <code>openai</code> · <code>openrouter</code>), outcome notifications to Telegram/Slack, durable per-run JSONL logs, and queue/run-log CLI commands.</p>
             <p><a href="standalone.html">Read the Standalone page →</a></p>
+          </li>
+          <li class="new">
+            <span class="tl-tag">L5 — hermes-parity chat</span><span class="tl-state">✅ new in v0.4.0</span>
+            <h4>Interactive chat, skills, and service install</h4>
+            <p>Bare <code>tachi-agent</code> opens an interactive REPL session. Unified <code>/commands</code> surface shared across REPL and Telegram (<code>/help</code>, <code>/tools</code>, <code>/model</code>, <code>/status</code>, <code>/driver</code>, <code>/skill</code>, <code>/reset</code>, <code>/jury</code>, <code>/search</code>, <code>/think</code>, <code>/task</code>, <code>/schedule</code>, <code>/exit</code>). Skill bundles (<code>.tachi/skills/*.md</code>) carry a system-prompt body, a tool allowlist, and a driver preset. <code>tachi-agent service install</code> bootstraps a macOS launchd <code>LaunchAgent</code> — the primary macOS daemon path. <code>tachi-agent doctor</code> runs preflight diagnostics.</p>
           </li>
         </ol>
       </div>

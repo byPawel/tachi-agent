@@ -38,6 +38,9 @@
         <strong>orchestrator.run(task)</strong>; the hub recalls memory, runs a
         <strong>bounded ReAct loop</strong>, logs the trace, and halts cleanly.
       </p>
+      <p class="hero-sub hero-anim d4">
+        <strong>Three composable layers:</strong> <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">Dokoro</a> gives tachi-agent persistent memory. <a href="https://tachibot.com" target="_blank" rel="noopener">TachiBot</a> gives it better judgment — TachiBot orchestrates models; tachi-agent orchestrates work.
+      </p>
     </div>
   </header>
 
@@ -223,6 +226,43 @@
             </tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <!-- ===================== THREE-LAYER POSITIONING ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="sec-kicker"><span class="box">┌─</span> the three layers</span>
+          <h2 class="sec-title">Dokoro ↔ tachi-agent ↔ TachiBot.</h2>
+          <p class="sec-lead">Three composable layers — memory, runtime, and reasoning. Each is independently replaceable; none depends on the internals of another.</p>
+        </div>
+
+        <div class="cards">
+          <article class="card" data-num="01">
+            <span class="card-tag">memory</span>
+            <h3><a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">Dokoro</a></h3>
+            <p>
+              Persistent session memory. tachi-agent calls <code>dokoro.recall</code> before each run and <code>dokoro.log</code> after — bookending the loop with durable context. Opt in to <strong>in-loop</strong> recall and per-step note writes for long multi-step tasks.
+            </p>
+          </article>
+          <article class="card" data-num="02">
+            <span class="card-tag">runtime</span>
+            <h3>tachi-agent</h3>
+            <p>
+              The ReAct loop that <strong>orchestrates work</strong>: drives the bounded reason/act/observe cycle, owns the task queue and daemon, manages skills, and surfaces the REPL, CLI, Telegram, and Gateway front-ends.
+            </p>
+          </article>
+          <article class="card" data-num="03">
+            <span class="card-tag">reasoning</span>
+            <h3><a href="https://tachibot.com" target="_blank" rel="noopener">TachiBot</a></h3>
+            <p>
+              Multi-model council that <strong>orchestrates models</strong>. tachi-agent calls <code>tachibot_jury</code>, <code>tachibot_council</code>, <code>tachibot_grok_search</code>, and other council tools over MCP — TachiBot handles provider routing and adjudication.
+            </p>
+          </article>
+        </div>
+
+        <p class="cards-tagline">"TachiBot orchestrates models; tachi-agent orchestrates work."</p>
       </div>
     </section>
 

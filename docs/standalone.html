@@ -37,10 +37,11 @@
         The daemon is the standalone foundation: a <strong>persistent task queue</strong>, a worker
         that drains it, <strong>recurring schedules</strong>, per-task <strong>driver selection</strong>,
         outcome <strong>notifications</strong>, and a durable per-run <strong>event log</strong>.
-        Run it under a process supervisor and it operates <em>unattended</em>.
+        On macOS, <code>tachi-agent service install</code> is the primary path — one command bootstraps a launchd <code>LaunchAgent</code> that starts at login and restarts on crash.
       </p>
       <div class="cta-row hero-anim d5">
-        <a class="btn btn-primary" href="#queue">Queue work →</a>
+        <a class="btn btn-primary" href="#service">Service install →</a>
+        <a class="btn" href="#queue">Queue work</a>
         <a class="btn" href="#drivers">Multi-heart drivers</a>
         <a class="btn" href="architecture.html">Architecture</a>
       </div>
@@ -48,11 +49,132 @@
   </header>
 
   <main>
+    <!-- ===================== SERVICE INSTALL (macOS — primary path) ===================== -->
+    <section class="section reveal" id="service">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">01</span>
+          <span class="sec-kicker"><span class="box">┌─</span> service install</span>
+          <h2 class="sec-title">macOS: one command, starts at login.</h2>
+          <p class="sec-lead"><code>tachi-agent service install</code> is the primary macOS daemon path. It reads env vars from your environment (or an <code>--env-file</code>), writes a <code>0600</code> plist under <code>~/Library/LaunchAgents</code>, and bootstraps the service with <code>launchctl</code>.</p>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — macOS service install</span>
+            <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
+          </div>
+<pre><span class="k">export</span> GATEWAY_TOKEN=<span class="s">"change-me"</span>
+tachi-agent service install --env-file .env   <span class="c"># bootstrap launchd LaunchAgent</span>
+<span class="c"># starts at login · restarts on crash</span>
+<span class="c"># logs: ~/Library/Logs/tachi-agent/daemon.log</span>
+
+tachi-agent service status    <span class="c"># check whether the agent is running</span>
+tachi-agent service uninstall <span class="c"># remove the plist + unload</span></pre>
+        </div>
+
+        <div class="prose">
+          <ul>
+            <li><strong><code>--env-file &lt;path&gt;</code></strong> — reads <code>GATEWAY_TOKEN</code> + all <code>TACHI_*</code> vars from the file and bakes them into the plist.</li>
+            <li><strong><code>--cwd &lt;dir&gt;</code></strong> — sets the daemon working directory (default <code>~/.tachi-agent</code>).</li>
+            <li>The plist is written <code>0600</code> so only your user can read it — provider keys are safe at rest.</li>
+          </ul>
+          <p>On <strong>Linux</strong>, run <code>node dist/daemon/index.js</code> under a systemd unit with <code>Restart=always</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SKILLS / RECIPES ===================== -->
+    <section class="section reveal" id="skills">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">02</span>
+          <span class="sec-kicker"><span class="box">//</span> skills / recipes</span>
+          <h2 class="sec-title">Markdown recipes that shape what a run sees.</h2>
+          <p class="sec-lead">Drop a <code>.md</code> file in <code>.tachi/skills/</code> (override with <code>TACHI_SKILLS_DIR</code>). The body becomes the system prompt; frontmatter carries the name, tool allowlist, and driver preset.</p>
+        </div>
+
+        <div class="code" data-lang="markdown">
+          <div class="code-head">
+            <span class="code-label">.tachi/skills/researcher.md</span>
+            <button class="copy-btn" aria-label="Copy skill file to clipboard">copy</button>
+          </div>
+<pre>---
+name: researcher
+description: Deep-research mode — searches and synthesizes a cited report.
+tools: tachibot_grok_search, tachibot_perplexity_ask, tachibot_nextThought
+driver: openai
+---
+You are a careful research assistant. Your output must be accurate and traceable.</pre>
+        </div>
+
+        <div class="prose">
+          <p>Activate a skill from the CLI or inside the REPL:</p>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — activate a skill</span>
+            <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
+          </div>
+<pre>tachi-agent --skill researcher <span class="s">"explain the CAP theorem trade-offs"</span>
+
+<span class="c"># or inside the interactive REPL</span>
+<span class="c"># /skill researcher</span></pre>
+        </div>
+
+        <div class="prose">
+          <p>Ready-made recipes live in <code>examples/skills/</code>: <code>repo-review</code>, <code>researcher</code>, <code>nightly-digest</code>, <code>fact-checker</code>. Copy them into your project's <code>.tachi/skills/</code> or point <code>TACHI_SKILLS_DIR</code> at the directory directly. Driver precedence: <code>--driver</code> flag / <code>/driver</code> command &gt; skill's <code>driver</code> field &gt; <code>TACHI_DRIVER</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== INTERACTIVE CHAT / COMMANDS ===================== -->
+    <section class="section reveal" id="chat">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">03</span>
+          <span class="sec-kicker"><span class="box">┌─</span> interactive chat</span>
+          <h2 class="sec-title">Bare <code>tachi-agent</code> opens a REPL.</h2>
+          <p class="sec-lead">No arguments? You get an interactive session. The same <code>/commands</code> surface works in the REPL <em>and</em> in Telegram.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Command</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>/help</code></td><td>Show the command list</td></tr>
+              <tr><td><code>/tools</code></td><td>List the agent's available tools</td></tr>
+              <tr><td><code>/model</code></td><td>Show the current model</td></tr>
+              <tr><td><code>/status</code></td><td>Show session state (driver, skill, mode)</td></tr>
+              <tr><td><code>/driver &lt;name&gt;|off</code></td><td>Set or clear the session driver</td></tr>
+              <tr><td><code>/skill &lt;name&gt;|off</code></td><td>Activate or clear a skill bundle</td></tr>
+              <tr><td><code>/reset</code></td><td>Clear the full session (driver + skill)</td></tr>
+              <tr><td><code>/jury &lt;question&gt;</code></td><td>Run a cross-model jury verdict via <code>tachibot_jury</code></td></tr>
+              <tr><td><code>/search &lt;query&gt;</code></td><td>Search with <code>tachibot_grok_search</code> or Perplexity</td></tr>
+              <tr><td><code>/think &lt;question&gt;</code></td><td>Reason step by step over a question</td></tr>
+              <tr><td><code>/task add &lt;text&gt;</code></td><td>Queue a task on the daemon</td></tr>
+              <tr><td><code>/task list</code></td><td>List queued tasks</td></tr>
+              <tr><td><code>/task show &lt;id&gt;</code></td><td>Show task detail</td></tr>
+              <tr><td><code>/schedule list</code></td><td>List scheduled jobs</td></tr>
+              <tr><td><code>/exit</code>, <code>/quit</code></td><td>Leave (REPL: Ctrl-D also exits)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="prose">
+          <p>The prompt shows the active session state: <code>tachi [driver·skill] ›</code>. History persists at <code>~/.tachi-agent/repl_history</code> (capped at 1000 lines). Run <code>tachi-agent doctor</code> for a preflight check of your environment before the first session.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- ===================== THE FOUNDATION ===================== -->
     <section class="section reveal">
       <div class="wrap">
         <div class="sec-head">
-          <span class="numeral" aria-hidden="true">01</span>
+          <span class="numeral" aria-hidden="true">04</span>
           <span class="sec-kicker"><span class="box">┌─</span> the foundation</span>
           <h2 class="sec-title">A daemon under a supervisor. A queue that survives it.</h2>
         </div>
@@ -76,7 +198,7 @@
     <section class="section reveal" id="queue">
       <div class="wrap">
         <div class="sec-head">
-          <span class="numeral" aria-hidden="true">02</span>
+          <span class="numeral" aria-hidden="true">05</span>
           <span class="sec-kicker"><span class="box">//</span> the queue</span>
           <h2 class="sec-title">Queue work from outside. External cron is the scheduler.</h2>
           <p class="sec-lead"><code>POST /tasks</code> enqueues <strong>durable</strong> work — unlike <code>POST /runs</code>, a queued task survives restarts and retries with backoff. External cron is the scheduler of record for anything calendar-driven you want outside the agent:</p>
@@ -120,7 +242,7 @@
     <section class="section reveal" id="schedules">
       <div class="wrap">
         <div class="sec-head">
-          <span class="numeral" aria-hidden="true">03</span>
+          <span class="numeral" aria-hidden="true">06</span>
           <span class="sec-kicker"><span class="box">┌─</span> recurring schedules</span>
           <h2 class="sec-title">A JSON file you edit by hand. Re-read live.</h2>
           <p class="sec-lead">For self-contained recurrence, the daemon also evaluates <code>.tachi/schedules.json</code> (<code>TACHI_SCHEDULES_FILE</code>) every <code>TACHI_SCHEDULES_POLL_MS</code> (default 30s) and enqueues due entries into the same queue:</p>
@@ -154,7 +276,7 @@
     <section class="section reveal" id="drivers">
       <div class="wrap">
         <div class="sec-head">
-          <span class="numeral" aria-hidden="true">04</span>
+          <span class="numeral" aria-hidden="true">07</span>
           <span class="sec-kicker"><span class="box">//</span> multi-heart</span>
           <h2 class="sec-title">One default brain. A different heart per task.</h2>
           <p class="sec-lead"><code>TACHI_DRIVER</code> picks the daemon's default brain (<code>ollama</code> by default — local, private). A task's optional <code>"driver"</code> field overrides it <strong>for that task only</strong>: keep the local heart for interactive chat, and send a nightly heavy job to <code>"driver": "openai"</code> or <code>"openrouter"</code>.</p>
@@ -218,7 +340,7 @@ curl -s -X POST -H <span class="s">"Authorization: Bearer $TACHI_TOKEN"</span> -
     <section class="section reveal" id="notify">
       <div class="wrap">
         <div class="sec-head">
-          <span class="numeral" aria-hidden="true">05</span>
+          <span class="numeral" aria-hidden="true">08</span>
           <span class="sec-kicker"><span class="box">┌─</span> notifications</span>
           <h2 class="sec-title">The agent reaches out. You don't poll.</h2>
         </div>
@@ -243,7 +365,7 @@ curl -s -X POST -H <span class="s">"Authorization: Bearer $TACHI_TOKEN"</span> -
     <section class="section reveal" id="inspect">
       <div class="wrap">
         <div class="sec-head">
-          <span class="numeral" aria-hidden="true">06</span>
+          <span class="numeral" aria-hidden="true">09</span>
           <span class="sec-kicker"><span class="box">//</span> inspecting state</span>
           <h2 class="sec-title">Everything an unattended run did, on disk.</h2>
         </div>

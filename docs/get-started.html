@@ -31,61 +31,80 @@
   <!-- ===================== HERO ===================== -->
   <header class="hero">
     <div class="wrap">
-      <p class="eyebrow hero-anim d1">// from clone to first answer</p>
+      <p class="eyebrow hero-anim d1">// from install to first chat</p>
       <h1 class="hero-anim d2">Get started</h1>
       <p class="hero-sub hero-anim d3">
-        No API keys, no cloud account. Pull a local model, point at your MCP servers, build,
-        and run your first task. <strong>Ctrl-C</strong> halts cleanly; progress to stderr,
+        No API keys, no cloud account. Install globally, pull a local model, and open an interactive
+        chat with bare <code>tachi-agent</code>. Run <code>tachi-agent doctor</code> first to
+        verify your environment. <strong>Ctrl-C</strong> halts cleanly; progress to stderr,
         the answer to stdout.
       </p>
     </div>
   </header>
 
   <main>
-    <!-- ===================== INSTALL / DEVELOP ===================== -->
+    <!-- ===================== GLOBAL INSTALL + CHAT QUICKSTART ===================== -->
     <section class="section reveal">
       <div class="wrap">
         <div class="sec-head">
           <span class="numeral" aria-hidden="true">01</span>
-          <span class="sec-kicker"><span class="box">┌─</span> install &amp; develop</span>
-          <h2 class="sec-title">Clone, test, build.</h2>
+          <span class="sec-kicker"><span class="box">┌─</span> install &amp; chat</span>
+          <h2 class="sec-title">Install globally. Open a chat. Done.</h2>
         </div>
         <div class="code" data-lang="bash">
           <div class="code-head">
-            <span class="code-label">bash — develop</span>
+            <span class="code-label">bash — global install + chat quickstart</span>
             <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
           </div>
-<pre>npm install
-npm test       <span class="c"># vitest — core orchestrator, fully mocked</span>
-npm run build  <span class="c"># tsc → dist/</span></pre>
+<pre><span class="c"># 1. install globally (or: npm install &amp;&amp; npm run build &amp;&amp; npm link)</span>
+npm i -g tachi-agent
+
+<span class="c"># 2. pull a local brain (or set TACHI_DRIVER=openai + OPENAI_API_KEY)</span>
+ollama serve &amp;
+ollama pull qwen2.5
+
+<span class="c"># 3. point at your MCP servers</span>
+<span class="k">export</span> TACHIBOT_CMD=<span class="s">"npx -y tachibot-mcp"</span>
+<span class="k">export</span> DOKORO_CMD=<span class="s">"npx -y @devlog-mcp/core"</span>   <span class="c"># optional</span>
+
+<span class="c"># 4. preflight check</span>
+tachi-agent doctor
+
+<span class="c"># 5. open interactive chat</span>
+tachi-agent</pre>
+        </div>
+        <div class="prose">
+          <p>
+            <code>tachi-agent doctor</code> checks your Ollama endpoint, required env vars, and MCP server commands — run it the first time and whenever something looks off.
+          </p>
+          <p>
+            Bare <code>tachi-agent</code> opens a persistent REPL session. The prompt shows <code>tachi [driver·skill] ›</code>. Type your task, or use <code>/help</code> to see the unified command list.
+            <kbd>Ctrl</kbd>+<kbd>D</kbd> or <code>/exit</code> to leave.
+          </p>
         </div>
       </div>
     </section>
 
-    <!-- ===================== RUN ===================== -->
+    <!-- ===================== ONE-SHOT + DEVELOP ===================== -->
     <section class="section reveal">
       <div class="wrap">
         <div class="sec-head">
           <span class="numeral" aria-hidden="true">02</span>
-          <span class="sec-kicker"><span class="box">//</span> run it locally</span>
-          <h2 class="sec-title">A local brain in four steps.</h2>
+          <span class="sec-kicker"><span class="box">//</span> one-shot &amp; develop</span>
+          <h2 class="sec-title">One-shot tasks and local development.</h2>
         </div>
         <div class="code" data-lang="bash">
           <div class="code-head">
-            <span class="code-label">bash — first run</span>
+            <span class="code-label">bash — one-shot + develop</span>
             <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
           </div>
-<pre><span class="c"># 1. local brain</span>
-ollama serve &amp;
-ollama pull qwen2.5
+<pre><span class="c"># one-shot task (pass a string argument)</span>
+tachi-agent <span class="s">"verify HEAD against ADR-1..3"</span>
 
-<span class="c"># 2. point at your MCP servers (council + memory)</span>
-<span class="k">export</span> TACHIBOT_CMD=<span class="s">"npx -y tachibot-mcp"</span>
-<span class="k">export</span> DOKORO_CMD=<span class="s">"npx -y @devlog-mcp/core"</span>   <span class="c"># optional</span>
-
-<span class="c"># 3. build + run</span>
-npm install &amp;&amp; npm run build
-node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
+<span class="c"># develop from source</span>
+npm install
+npm test       <span class="c"># vitest — core orchestrator, fully mocked</span>
+npm run build  <span class="c"># tsc → dist/</span></pre>
         </div>
         <div class="prose">
           <p>
@@ -106,15 +125,15 @@ node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
         </div>
         <div class="prose">
           <ul>
-            <li><strong>CLI</strong> — one-shot tasks: <code>node dist/cli.js "…"</code>.</li>
-            <li><strong>REPL</strong> — interactive session loop.</li>
-            <li><strong>Telegram</strong> — bot front-end with allowed user-ids.</li>
+            <li><strong>CLI / REPL (default)</strong> — bare <code>tachi-agent</code> opens the interactive REPL; pass a string for a one-shot task.</li>
+            <li><strong>Skills</strong> — <code>--skill &lt;name&gt;</code> loads a <code>.tachi/skills/*.md</code> recipe (system prompt + tool allowlist + driver preset).</li>
+            <li><strong>Telegram</strong> — bot front-end with allowed user-ids; unified <code>/commands</code> surface.</li>
             <li><strong>Slack</strong> — Socket Mode app.</li>
             <li><strong>Claude Code</strong> — connect in via the <code>run_agent</code> MCP server.</li>
             <li><strong>HTTP / SSE Gateway</strong> — async jobs + streamed events.</li>
             <li><strong>OpenClaw bridge</strong> — delegate over the gateway with <code>GatewayClient</code>.</li>
             <li><strong>Swarm</strong> — fan-out / synthesize bin: <code>npm run swarm</code>.</li>
-            <li><strong>Standalone daemon</strong> — unattended queue + schedules + notifications: <code>node dist/daemon/index.js</code> under launchd / systemd — <a href="standalone.html">Standalone page</a>.</li>
+            <li><strong>Standalone daemon</strong> — unattended queue + schedules + notifications: <code>tachi-agent service install</code> (macOS launchd, primary path) or <code>node dist/daemon/index.js</code> under systemd — <a href="standalone.html">Standalone page</a>.</li>
           </ul>
         </div>
       </div>
@@ -144,6 +163,7 @@ node dist/cli.js <span class="s">"verify HEAD against ADR-1..3"</span></pre>
               <tr><td><code>GATEWAY_TOKEN</code> / <code>GATEWAY_PORT</code></td><td>Bearer token and port for the HTTP/SSE gateway.</td></tr>
               <tr><td><code>TACHI_MAX_TOOL_RESULT_CHARS</code></td><td>Truncate tool results before they reach the model context — defaults to <code>30000</code>; <code>0</code> disables.</td></tr>
               <tr><td><code>TACHI_MAX_EMPTY_TURNS</code></td><td>Consecutive blank model turns nudged through before halting as <code>empty-response</code> (default <code>2</code>).</td></tr>
+              <tr><td><code>TACHI_SKILLS_DIR</code></td><td>Directory of <code>*.md</code> skill files (default <code>.tachi/skills</code>). Malformed files are skipped with a warning.</td></tr>
             </tbody>
           </table>
         </div>
