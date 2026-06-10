@@ -22,11 +22,24 @@
  *   TACHI_SESSION_TTL_MS            idle TTL before an unattached, finished run is GC'd (default 600000)
  *   TACHI_SESSION_BUFFER_MAX        per-run event ring-buffer cap (default 10000)
  *   TACHI_DRAIN_TIMEOUT_MS          upper bound on drain wait before forced close (default 30000)
+ *   TACHI_QUEUE_FILE                persistent task-queue file (default .tachi/queue.json)
+ *   TACHI_QUEUE_POLL_MS             worker poll cadence over the queue (default 2000)
+ *   TACHI_RUN_LOG_DIR               durable per-run event log dir (default .tachi/runs)
+ *   TACHI_NOTIFY                    outcome push targets, e.g. "telegram:123,slack:C0ABC"
+ *   TACHI_SCHEDULES_FILE            recurring-schedule definitions (default .tachi/schedules.json)
+ *   TACHI_SCHEDULES_POLL_MS         schedule evaluation cadence (default 30000)
+ *   TACHI_DRIVER                    default brain for runs/tasks (ollama|hermes|openai|openrouter);
+ *                                   a queued task's own `driver` field overrides it per task
  */
 import { buildAgentFromEnv } from "../runtime.js";
 import { createGatewayServer, type GatewayControls } from "../gateway/server.js";
 import { formatSse } from "../gateway/sse.js";
 import { num, gcInterval } from "./config.js";
+import { RunEventLog } from "./eventlog.js";
+import { TaskQueue } from "./queue.js";
+import { createWorker } from "./worker.js";
+import { Schedules } from "./schedules.js";
+import { createNotifiers, notifyAll } from "../notify.js";
 
 const DRAIN_POLL_MS = 200; // how often drain checks whether sinks have cleared
 
@@ -44,8 +57,28 @@ async function main(): Promise<void> {
   const runtime = await buildAgentFromEnv(); // singleton — held for the daemon's lifetime
   const controls: GatewayControls = { draining: false, sinks: new Set() };
 
+  // Standalone-agent foundation: durable event log + persistent queue + worker + notifiers + schedules.
+  const eventLog = new RunEventLog();
+  const queue = await TaskQueue.open();
+  const notifiers = createNotifiers(process.env);
+  const worker = createWorker({
+    queue,
+    runTask: (task, driver) => runtime.orchestrator({ timeoutMs: 120_000 }, driver).run(task),
+    notify: notifiers.length ? (text) => notifyAll(notifiers, text) : undefined,
+    pollMs: num(process.env.TACHI_QUEUE_POLL_MS, 2_000),
+    isDraining: () => controls.draining,
+  });
+  worker.start();
+  const schedules = new Schedules();
+  const schedulesTimer = setInterval(() => {
+    void schedules.tick(queue).then((ts) => {
+      if (ts.length) console.error(`[daemon] schedules enqueued ${ts.length} task(s)`);
+    });
+  }, num(process.env.TACHI_SCHEDULES_POLL_MS, 30_000));
+  schedulesTimer.unref?.();
+
   // The gateway populates `controls.collect` (a TTL/GC sweep over its run registry).
-  const server = createGatewayServer(runtime, { timeoutMs: 120_000, sessionBufferMax, controls });
+  const server = createGatewayServer(runtime, { timeoutMs: 120_000, sessionBufferMax, controls, eventLog, queue });
 
   // Periodic GC: evict unattached, finished runs idle past the TTL so their ring
   // buffers don't accumulate forever (a completed run is otherwise never reclaimed).
@@ -61,6 +94,8 @@ async function main(): Promise<void> {
     if (draining) return; // a second signal during drain → ignore (hard timeout still applies)
     draining = true;
     controls.draining = true; // reject new POST /runs with 503
+    worker.stop();            // stop claiming queued tasks (in-flight one finishes or hits the hard timeout)
+    clearInterval(schedulesTimer);
     console.error(`[daemon] ${sig} — draining: rejecting new runs, finishing in-flight…`);
 
     // Tell every live client we're going down so it can stop waiting / reconnect elsewhere.
@@ -92,7 +127,10 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void drain("SIGTERM"));
 
   server.listen(port, () =>
-    console.error(`tachi-agent daemon on :${port} · ${runtime.toolCount} tools · session TTL ${ttlMs}ms`),
+    console.error(
+      `tachi-agent daemon on :${port} · ${runtime.toolCount} tools · session TTL ${ttlMs}ms · ` +
+        `${queue.list().filter((t) => t.status === "queued").length} queued task(s) · ${notifiers.length} notify target(s)`,
+    ),
   );
 }
 
