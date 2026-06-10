@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { nsName, parseNs, isAllowed, McpToolHost, truncateResult, DEFAULT_MAX_RESULT_CHARS } from "../mcp.js";
 
 describe("nsName", () => {
@@ -98,6 +98,48 @@ describe("McpToolHost.call result truncation", () => {
     const out = await host.call("tachibot_jury", {});
     expect(out).toContain("…[truncated 50 chars]");
     expect(out.length).toBeLessThan(DEFAULT_MAX_RESULT_CHARS + 50);
+  });
+});
+
+describe("McpToolHost.call result cap — TACHI_MAX_TOOL_RESULT_CHARS env precedence", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("env alone sets the cap when no explicit option is given", async () => {
+    vi.stubEnv("TACHI_MAX_TOOL_RESULT_CHARS", "100");
+    const host = hostWith("tachibot", textClient("z".repeat(500)));
+    const out = await host.call("tachibot_jury", {});
+    expect(out.startsWith("z".repeat(100))).toBe(true);
+    expect(out).toContain("…[truncated 400 chars]");
+  });
+
+  it("an explicit maxResultChars option wins over the env var", async () => {
+    vi.stubEnv("TACHI_MAX_TOOL_RESULT_CHARS", "100");
+    const host = hostWith("tachibot", textClient("z".repeat(500)), undefined, { maxResultChars: 200 });
+    const out = await host.call("tachibot_jury", {});
+    expect(out.startsWith("z".repeat(200))).toBe(true);
+    expect(out).toContain("…[truncated 300 chars]");
+  });
+
+  it("explicit option 0 (disable) wins over an env cap", async () => {
+    vi.stubEnv("TACHI_MAX_TOOL_RESULT_CHARS", "100");
+    const host = hostWith("tachibot", textClient("z".repeat(500)), undefined, { maxResultChars: 0 });
+    await expect(host.call("tachibot_jury", {})).resolves.toBe("z".repeat(500));
+  });
+
+  it("a non-numeric env value falls back to the default cap", async () => {
+    vi.stubEnv("TACHI_MAX_TOOL_RESULT_CHARS", "not-a-number");
+    const host = hostWith("tachibot", textClient("z".repeat(DEFAULT_MAX_RESULT_CHARS + 50)));
+    const out = await host.call("tachibot_jury", {});
+    expect(out).toContain("…[truncated 50 chars]"); // default cap applied, not Infinity/NaN
+  });
+
+  it("a blank env value falls back to the default cap", async () => {
+    vi.stubEnv("TACHI_MAX_TOOL_RESULT_CHARS", "   ");
+    const host = hostWith("tachibot", textClient("z".repeat(DEFAULT_MAX_RESULT_CHARS + 50)));
+    const out = await host.call("tachibot_jury", {});
+    expect(out).toContain("…[truncated 50 chars]");
   });
 });
 
