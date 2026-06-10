@@ -6,6 +6,7 @@ import type { GatewayEvent } from "./types.js";
 import { RunRegistry } from "./registry.js";
 import { parseBearer, resolveTenant } from "./auth.js";
 import { formatSse, SSE_HEADERS } from "./sse.js";
+import type { RunEventLog } from "../daemon/eventlog.js";
 
 const DEFAULT_MAX_BODY_BYTES = 64 * 1024; // request body cap — prevents OOM via giant POST
 const DEFAULT_MAX_TASK_CHARS = 32 * 1024; // task string cap
@@ -36,6 +37,8 @@ export interface GatewayOptions {
   maxBodyBytes?: number;
   /** Task string cap in characters (400 past this). Default 32 KiB. */
   maxTaskChars?: number;
+  /** Optional durable event log — every registry append is also persisted (fire-and-forget). */
+  eventLog?: RunEventLog;
 }
 
 /** Mutable drain control surface shared between the gateway and its owner (the daemon). */
@@ -120,7 +123,10 @@ export function createGatewayServer(
             : opts.maxIterations;
 
         const record = registry.create(tenant.tenant, task);
-        const onEvent = (e: AgentEvent) => registry.append(record.id, e);
+        const onEvent = (e: AgentEvent) => {
+          const seq = registry.append(record.id, e);
+          void opts.eventLog?.append(record.id, seq, e).catch(() => { /* logging must never break a run */ });
+        };
         runtime
           .orchestrator({ maxIterations: reqIter, timeoutMs: opts.timeoutMs, signal: record.controller.signal, onEvent })
           .run(task)
@@ -128,7 +134,8 @@ export function createGatewayServer(
             (result) => registry.finish(record.id, record.controller.signal.aborted ? "aborted" : "done", result),
             (err) => {
               const message = err instanceof Error ? err.message : String(err);
-              registry.append(record.id, { type: "error", message });
+              const seq = registry.append(record.id, { type: "error", message });
+              void opts.eventLog?.append(record.id, seq, { type: "error", message }).catch(() => {});
               registry.finish(record.id, "error", undefined, message);
             },
           )
