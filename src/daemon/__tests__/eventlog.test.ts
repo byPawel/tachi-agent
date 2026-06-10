@@ -45,4 +45,18 @@ describe("RunEventLog", () => {
     const log = new RunEventLog({ dir });
     await expect(log.append("../evil", 1, { type: "heartbeat" })).rejects.toThrow(/run id/);
   });
+
+  it("preserves call order under fire-and-forget appends", async () => {
+    const log = new RunEventLog({ dir, now: () => 1 });
+    // The gateway calls append without awaiting; un-awaited concurrent writes
+    // must still land in call order, not whichever appendFile wins the race.
+    for (let i = 1; i <= 50; i++) {
+      void log.append("run-x", i, { type: "step", iteration: i });
+    }
+    await log.append("run-x", 51, { type: "step", iteration: 51 });
+    const entries = await log.read("run-x");
+    expect(entries.map((e) => e.seq)).toEqual(
+      Array.from({ length: 51 }, (_, i) => i + 1),
+    );
+  });
 });

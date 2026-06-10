@@ -26,6 +26,8 @@ export class RunEventLog {
   private readonly dir: string;
   private readonly now: () => number;
   private mkdirDone: Promise<unknown> | undefined;
+  /** Serializes appends: call order = write order, even for un-awaited calls. */
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(opts: { dir?: string; now?: () => number } = {}) {
     this.dir = opts.dir ?? process.env.TACHI_RUN_LOG_DIR ?? ".tachi/runs";
@@ -37,13 +39,25 @@ export class RunEventLog {
     return join(this.dir, `${runId}.jsonl`);
   }
 
-  /** Append one event line. Creates the directory on first use. */
+  /**
+   * Append one event line. Creates the directory on first use.
+   *
+   * The gateway calls this fire-and-forget, so writes are serialized through an
+   * internal promise chain — two un-awaited appends land in CALL order, never in
+   * whichever appendFile happens to win the race.
+   */
   async append(runId: string, seq: number, event: GatewayEvent): Promise<void> {
-    const file = this.file(runId); // validate BEFORE any I/O
-    this.mkdirDone ??= mkdir(this.dir, { recursive: true });
-    await this.mkdirDone;
-    const entry: LoggedEvent = { seq, ts: this.now(), event };
-    await appendFile(file, JSON.stringify(entry) + "\n", "utf8");
+    const file = this.file(runId); // validate BEFORE queueing
+    const entry: LoggedEvent = { seq, ts: this.now(), event }; // timestamp at call time
+    const prev = this.writeChain;
+    const job = (async () => {
+      await prev.catch(() => {}); // never let one failure wedge the chain
+      this.mkdirDone ??= mkdir(this.dir, { recursive: true });
+      await this.mkdirDone;
+      await appendFile(file, JSON.stringify(entry) + "\n", "utf8");
+    })();
+    this.writeChain = job.catch(() => {});
+    return job;
   }
 
   /** All logged events for a run, in file order. Missing file → []; corrupt lines skipped. */
