@@ -130,6 +130,29 @@ describe("parseCliArgs", () => {
     });
   });
 
+  // --- service subcommand ----------------------------------------------------
+
+  it("service install bare", () => {
+    expect(parseCliArgs(["service", "install"])).toEqual({ command: "service-install" });
+  });
+
+  it("service install with --env-file and --cwd", () => {
+    expect(parseCliArgs(["service", "install", "--env-file", "/p/.env", "--cwd", "/w"])).toEqual({
+      command: "service-install",
+      envFile: "/p/.env",
+      cwd: "/w",
+    });
+  });
+
+  it("service uninstall and status", () => {
+    expect(parseCliArgs(["service", "uninstall"])).toEqual({ command: "service-uninstall" });
+    expect(parseCliArgs(["service", "status"])).toEqual({ command: "service-status" });
+  });
+
+  it("service with unknown or missing action returns service-help", () => {
+    expect(parseCliArgs(["service"])).toEqual({ command: "service-help" });
+    expect(parseCliArgs(["service", "frobnicate"])).toEqual({ command: "service-help" });
+  });
 });
 
 // ---------------------------------------------------------------------------

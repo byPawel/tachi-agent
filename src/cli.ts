@@ -6,6 +6,33 @@ import { parseCliArgs, taskAdd, taskList, taskShow, runsLog, type CliDeps } from
 import { resolveRunOptions, type ChatSession } from "./chat-commands.js";
 import { loadSkills, findSkill } from "./skills.js";
 import { runRepl } from "./frontends/repl.js";
+import { serviceInstall, serviceUninstall, serviceStatus, type ServiceDeps } from "./service.js";
+import { execFile as execFileCb } from "node:child_process";
+import { homedir } from "node:os";
+
+/** Real-process ServiceDeps: never-throwing launchctl exec, stdout/stderr split. */
+function makeServiceDeps(): ServiceDeps {
+  return {
+    platform: process.platform,
+    home: homedir(),
+    env: process.env as Record<string, string | undefined>,
+    uid: process.getuid?.() ?? 0,
+    execPath: process.execPath,
+    execFile: (cmd, args) =>
+      new Promise((resolve) => {
+        execFileCb(cmd, args, (err, stdout, stderr) => {
+          const code = err
+            ? typeof (err as NodeJS.ErrnoException & { code?: unknown }).code === "number"
+              ? ((err as unknown as { code: number }).code)
+              : 1
+            : 0;
+          resolve({ code, stdout: String(stdout), stderr: String(stderr) });
+        });
+      }),
+    stdout: (line) => console.log(line),
+    stderr: (line) => console.error(line),
+  };
+}
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -16,6 +43,29 @@ async function main() {
   // -------------------------------------------------------------------------
   if (parsed.command === "chat") {
     await runRepl({ driver: parsed.driver, skill: parsed.skill });
+    return;
+  }
+
+  // -------------------------------------------------------------------------
+  // service install / uninstall / status — launchd daemon autostart (macOS)
+  // -------------------------------------------------------------------------
+  if (parsed.command.startsWith("service-")) {
+    if (parsed.command === "service-help") {
+      console.error("Usage: tachi-agent service install [--env-file <path>] [--cwd <dir>] | uninstall | status");
+      process.exit(1);
+    }
+    const deps = makeServiceDeps();
+    switch (parsed.command) {
+      case "service-install":
+        await serviceInstall(deps, { envFile: parsed.envFile, cwd: parsed.cwd });
+        break;
+      case "service-uninstall":
+        await serviceUninstall(deps);
+        break;
+      case "service-status":
+        await serviceStatus(deps);
+        break;
+    }
     return;
   }
 

@@ -27,7 +27,11 @@ export type ParsedCliArgs =
   | { command: "task-add"; text: string; driver?: string; maxAttempts?: number }
   | { command: "task-list" }
   | { command: "task-show"; id: string }
-  | { command: "runs-log"; id: string };
+  | { command: "runs-log"; id: string }
+  | { command: "service-install"; envFile?: string; cwd?: string }
+  | { command: "service-uninstall" }
+  | { command: "service-status" }
+  | { command: "service-help" };
 
 // ---------------------------------------------------------------------------
 // parseCliArgs
@@ -41,6 +45,7 @@ export type ParsedCliArgs =
  *   task list
  *   task show <id>
  *   runs log <id>
+ *   service install [--env-file <p>] [--cwd <d>] | uninstall | status
  *   [--driver <name>] [--skill <name>]            →  { command: "chat", ... }
  *   <text...> [--driver <name>] [--skill <name>]  →  { command: "run", ... }
  *
@@ -61,6 +66,27 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 
   if (first === "runs" && second === "log") {
     return { command: "runs-log", id: rest[0] ?? "" };
+  }
+
+  if (first === "service") {
+    if (second === "uninstall") return { command: "service-uninstall" };
+    if (second === "status") return { command: "service-status" };
+    if (second === "install") {
+      let envFile: string | undefined;
+      let cwd: string | undefined;
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === "--env-file" && rest[i + 1] !== undefined) envFile = rest[++i];
+        else if (rest[i] === "--cwd" && rest[i + 1] !== undefined) cwd = rest[++i];
+      }
+      return {
+        command: "service-install",
+        ...(envFile !== undefined ? { envFile } : {}),
+        ...(cwd !== undefined ? { cwd } : {}),
+      };
+    }
+    // Unknown/missing action — let the CLI print usage instead of running "service"
+    // through the agent.
+    return { command: "service-help" };
   }
 
   if (first === "task" && second === "add") {
