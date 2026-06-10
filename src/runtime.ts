@@ -2,7 +2,8 @@
  * Shared runtime wiring — every front-end (CLI, MCP server, Telegram, Slack)
  * builds the agent the same way from env, so the wiring lives in ONE place.
  */
-import { OllamaDriver } from "./drivers/ollama.js";
+import "./drivers/register.js"; // side-effect: registers the built-in drivers (ollama, hermes, openai, openrouter)
+import { getDriver, listDrivers } from "./registry.js";
 import { McpToolHost, type McpServerConfig } from "./host/mcp.js";
 import { DokoroMemory } from "./memory/dokoro.js";
 import { Orchestrator } from "./agent.js";
@@ -13,8 +14,14 @@ export interface AgentRuntime {
   driver: Driver;
   memory?: Memory;
   toolCount: number;
-  /** Make a fresh orchestrator with per-run options (signal, onEvent, caps). */
-  orchestrator(options?: OrchestratorOptions): Orchestrator;
+  /**
+   * Make a fresh orchestrator with per-run options (signal, onEvent, caps).
+   * `driverName` (optional) overrides the brain for THIS run only — resolved
+   * through the driver registry, falling back to the runtime's default driver.
+   * This is the multi-heart seam: background jobs can run on a different brain
+   * than interactive runs without rebuilding the runtime.
+   */
+  orchestrator(options?: OrchestratorOptions, driverName?: string): Orchestrator;
   close(): Promise<void>;
 }
 
@@ -101,7 +108,20 @@ export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentR
   const host = new McpToolHost({ allow: resolveAllow(opts.allow), callTimeoutMs: resolveCallTimeoutMs() });
   if (servers.length) await host.connect(servers);
 
-  const driver = new OllamaDriver();
+  // TACHI_DRIVER selects the brain by registered name (default "ollama").
+  // Brains are config, not code: ollama | hermes | openai | openrouter, plus
+  // anything an external package registered via registerDriver().
+  const driverName = process.env.TACHI_DRIVER?.trim() || "ollama";
+  let driver: Driver;
+  try {
+    driver = getDriver(driverName);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `TACHI_DRIVER="${driverName}" could not be resolved: ${detail} ` +
+      `Registered drivers: ${listDrivers().join(", ")}.`,
+    );
+  }
   const memory = servers.some((s) => s.name === "dokoro")
     ? new DokoroMemory(host, { aiModel: driver.name })
     : undefined;
@@ -121,7 +141,12 @@ export async function buildAgentFromEnv(opts: BuildOptions = {}): Promise<AgentR
     driver,
     memory,
     toolCount: host.tools().length,
-    orchestrator: (options) => new Orchestrator(driver, host, memory, { forceGrounding, maxEmptyTurns, ...options }),
+    orchestrator: (options, overrideName) =>
+      new Orchestrator(overrideName ? getDriver(overrideName) : driver, host, memory, {
+        forceGrounding,
+        maxEmptyTurns,
+        ...options,
+      }),
     close: () => host.close(),
   };
 }
