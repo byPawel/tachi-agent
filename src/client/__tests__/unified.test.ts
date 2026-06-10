@@ -90,3 +90,78 @@ describe("createUnifiedClient", () => {
     await client.close(); // remote close is a no-op; must not throw
   });
 });
+
+describe("run options pass-through", () => {
+  it("local mode: driver split out as second arg to orchestrator, other options forwarded", async () => {
+    // Capture the two-arg call to orchestrator.
+    const orchestratorCalls: Array<{ opts: Record<string, unknown>; driverName?: string }> = [];
+    const rt = {
+      orchestrator: (opts?: Record<string, unknown>, driverName?: string) => {
+        orchestratorCalls.push({ opts: opts ?? {}, driverName });
+        return { run: async () => RESULT };
+      },
+      close: async () => {},
+    } as unknown as AgentRuntime;
+
+    const build = vi.fn(async () => rt);
+    const client = await createUnifiedClient({}, { buildAgentFromEnv: build });
+    await client.run("task", {
+      onEvent: () => {},
+      driver: "openai",
+      systemPrompt: "be brief",
+      allowTools: ["tachibot_jury"],
+    });
+
+    expect(orchestratorCalls).toHaveLength(1);
+    expect(orchestratorCalls[0].driverName).toBe("openai");
+    expect(orchestratorCalls[0].opts.systemPrompt).toBe("be brief");
+    expect(orchestratorCalls[0].opts.allowTools).toEqual(["tachibot_jury"]);
+    // driver must NOT appear inside the options object — it goes as the second arg.
+    expect(orchestratorCalls[0].opts.driver).toBeUndefined();
+  });
+
+  it("daemon mode: driver, systemPrompt, allowTools included in POST /runs body", async () => {
+    // A fake fetch that captures POST /runs body and returns a minimal 202 + SSE stream.
+    const capturedBodies: unknown[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      if (url.includes("/runs") && init?.method === "POST") {
+        capturedBodies.push(JSON.parse(init.body as string));
+        // Return a minimal 202 with a run_id.
+        return new Response(JSON.stringify({ run_id: "r1", status: "running" }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/runs/r1/events")) {
+        // Minimal SSE stream: final event then close.
+        const sseBody = 'data: {"type":"final","answer":"remote ok","haltedBy":"final-answer"}\nid: 1\n\n';
+        return new Response(sseBody, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const client = await createUnifiedClient(
+      { TACHI_DAEMON_URL: "http://127.0.0.1:9999", GATEWAY_TOKEN: "tok" },
+      { fetchImpl: fakeFetch },
+    );
+    const result = await client.run("remote task", {
+      onEvent: () => {},
+      driver: "openai",
+      systemPrompt: "be brief",
+      allowTools: ["tachibot_jury"],
+    });
+
+    expect(capturedBodies).toHaveLength(1);
+    const body = capturedBodies[0] as Record<string, unknown>;
+    expect(body.task).toBe("remote task");
+    expect(body.driver).toBe("openai");
+    expect(body.systemPrompt).toBe("be brief");
+    expect(body.allowTools).toEqual(["tachibot_jury"]);
+    expect(result.answer).toBe("remote ok");
+    expect(result.haltedBy).toBe("final-answer");
+  });
+});

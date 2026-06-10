@@ -119,6 +119,20 @@ export function createGatewayServer(
           return json(res, 429, { error: "too many concurrent runs" });
         }
 
+        // Validate and extract optional run options: driver, systemPrompt, allowTools.
+        const driver = body.driver === undefined ? undefined : body.driver;
+        if (driver !== undefined && (typeof driver !== "string" || !driver.trim())) {
+          return json(res, 400, { error: "driver must be a string" });
+        }
+        const systemPrompt = body.systemPrompt === undefined ? undefined : body.systemPrompt;
+        if (systemPrompt !== undefined && (typeof systemPrompt !== "string" || systemPrompt.length > 16 * 1024)) {
+          return json(res, 400, { error: "systemPrompt must be a string of at most 16KiB" });
+        }
+        const allowTools = body.allowTools === undefined ? undefined : body.allowTools;
+        if (allowTools !== undefined && (!Array.isArray(allowTools) || allowTools.length > 64 || allowTools.some((t) => typeof t !== "string"))) {
+          return json(res, 400, { error: "allowTools must be an array of at most 64 strings" });
+        }
+
         // Clamp caller-supplied iterations to [1, ceiling].
         const reqIter =
           typeof body.maxIterations === "number"
@@ -131,7 +145,7 @@ export function createGatewayServer(
           void opts.eventLog?.append(record.id, seq, e).catch(() => { /* logging must never break a run */ });
         };
         runtime
-          .orchestrator({ maxIterations: reqIter, timeoutMs: opts.timeoutMs, signal: record.controller.signal, onEvent })
+          .orchestrator({ maxIterations: reqIter, timeoutMs: opts.timeoutMs, signal: record.controller.signal, onEvent, systemPrompt, allowTools }, typeof driver === "string" ? driver : undefined)
           .run(task)
           .then(
             (result) => registry.finish(record.id, record.controller.signal.aborted ? "aborted" : "done", result),
