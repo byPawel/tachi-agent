@@ -31,11 +31,19 @@ export interface Worker {
   tick(): Promise<boolean>;
   start(): void;
   stop(): void;
+  /**
+   * Settles when the currently executing tick (if any) finishes — including its
+   * queue flush. `stop()` only prevents NEW claims; drain awaits this so an
+   * in-flight task gets to complete/fail and persist instead of being abandoned
+   * as "running" on disk when the process exits.
+   */
+  inFlight(): Promise<void>;
 }
 
 export function createWorker(deps: WorkerDeps): Worker {
   let timer: ReturnType<typeof setInterval> | undefined;
   let busy = false;
+  let currentTick: Promise<boolean> | undefined;
 
   const say = async (text: string) => {
     try { await deps.notify?.(text); } catch { /* alerting must never wedge the queue */ }
@@ -73,13 +81,17 @@ export function createWorker(deps: WorkerDeps): Worker {
       timer = setInterval(() => {
         if (busy) return; // never overlap ticks
         busy = true;
-        void tick().finally(() => { busy = false; });
+        currentTick = tick().finally(() => { busy = false; currentTick = undefined; });
+        void currentTick;
       }, deps.pollMs ?? 2000);
       timer.unref?.();
     },
     stop() {
       if (timer) clearInterval(timer);
       timer = undefined;
+    },
+    inFlight() {
+      return currentTick ? currentTick.then(() => undefined) : Promise.resolve();
     },
   };
 }

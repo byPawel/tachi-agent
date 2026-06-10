@@ -94,9 +94,13 @@ async function main(): Promise<void> {
     if (draining) return; // a second signal during drain → ignore (hard timeout still applies)
     draining = true;
     controls.draining = true; // reject new POST /runs with 503
-    worker.stop();            // stop claiming queued tasks (in-flight one finishes or hits the hard timeout)
+    worker.stop();            // stop claiming queued tasks…
     clearInterval(schedulesTimer);
     console.error(`[daemon] ${sig} — draining: rejecting new runs, finishing in-flight…`);
+
+    // …but let the in-flight queue task finish and FLUSH (so it isn't abandoned as
+    // "running" on disk with a burned attempt), bounded by the drain hard timeout.
+    await Promise.race([worker.inFlight(), new Promise((r) => setTimeout(r, drainTimeoutMs))]);
 
     // Tell every live client we're going down so it can stop waiting / reconnect elsewhere.
     const frame = formatSse({ type: "shutdown", reason: "server draining" });

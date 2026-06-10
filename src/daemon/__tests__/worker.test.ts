@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TaskQueue } from "../queue.js";
@@ -74,6 +74,43 @@ describe("worker tick", () => {
       { task: "cloud job", driver: "openai" },
       { task: "local job", driver: undefined },
     ]);
+  });
+
+  it("inFlight() resolves immediately when no tick is executing", async () => {
+    const queue = await openQueue();
+    const worker = createWorker({
+      queue,
+      runTask: async () => ({ answer: "x", haltedBy: "final-answer" }),
+    });
+    await expect(worker.inFlight()).resolves.toBeUndefined(); // idle → already settled
+  });
+
+  it("inFlight() tracks the executing tick past stop(), so drain can await completion + flush", async () => {
+    const queue = await openQueue();
+    const t = queue.enqueue("slow job");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const worker = createWorker({
+      queue,
+      runTask: async () => { await gate; return { answer: "finished late", haltedBy: "final-answer" }; },
+      pollMs: 5,
+    });
+
+    worker.start();
+    while (queue.get(t.id)?.status !== "running") await new Promise((r) => setTimeout(r, 5));
+    worker.stop(); // drain: no NEW claims — but the in-flight task must still get to finish
+
+    let settled = false;
+    const waiting = worker.inFlight().then(() => { settled = true; });
+    await new Promise((r) => setTimeout(r, 25));
+    expect(settled).toBe(false);                       // still executing → inFlight stays pending
+
+    release();
+    await waiting;
+    expect(queue.get(t.id)?.status).toBe("done");      // completed, not abandoned as "running"
+    expect(queue.get(t.id)?.answer).toBe("finished late");
+    const onDisk = JSON.parse(await readFile(join(dir, "q.json"), "utf8")) as { tasks: Array<{ id: string; status: string }> };
+    expect(onDisk.tasks.find((x) => x.id === t.id)?.status).toBe("done"); // flushed by the time inFlight settles
   });
 
   it("treats a halted (non-final-answer) run as a failure so it retries", async () => {
