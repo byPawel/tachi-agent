@@ -72,6 +72,8 @@ export class Schedules {
   private defs: ScheduleDef[] = [];
   /** lastRunAt by schedule id; null until first loaded from the state file. */
   private lastRunAt: Record<string, number> | null = null;
+  /** Busy guard (same pattern as the worker): an overlapping tick would read stale lastRunAt and double-enqueue. */
+  private ticking = false;
 
   constructor(opts: { file?: string; now?: () => number } = {}) {
     this.file = opts.file ?? process.env.TACHI_SCHEDULES_FILE ?? join(".tachi", "schedules.json");
@@ -84,9 +86,13 @@ export class Schedules {
   /**
    * Re-reads the definitions file (so hand edits apply without restart), enqueues
    * every DUE schedule, records+persists lastRunAt. Returns the enqueued tasks.
-   * Malformed defs are skipped with a stderr warn. Never throws.
+   * Malformed defs are skipped with a stderr warn. Never throws. Overlap-guarded:
+   * a tick entered while one is still running returns [] immediately (a slow tick
+   * + interval pile-up must not fire the same schedule twice off stale state).
    */
   async tick(queue: TaskQueue): Promise<QueueTask[]> {
+    if (this.ticking) return [];
+    this.ticking = true;
     try {
       await this.readDefs();
       if (this.lastRunAt === null) this.lastRunAt = await this.readState();
@@ -106,6 +112,8 @@ export class Schedules {
     } catch (e) {
       console.error(`[schedules] tick failed (continuing): ${e instanceof Error ? e.message : String(e)}`);
       return [];
+    } finally {
+      this.ticking = false;
     }
   }
 

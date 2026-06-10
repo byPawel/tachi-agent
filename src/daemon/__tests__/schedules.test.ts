@@ -99,6 +99,19 @@ describe("Schedules", () => {
     expect(s.list()).toEqual([]);
   });
 
+  it("guards against overlapping ticks — concurrent tick() never double-enqueues", async () => {
+    await writeDefs([{ id: "once", task: "only once", kind: "every", everyMinutes: 60 }]);
+    const now = local(10, 0);
+    const queue = await openQueue(() => now);
+    const s = new Schedules({ file: defsFile, now: () => now });
+
+    // Start both ticks synchronously WITHOUT awaiting the first: the defs read is
+    // async, so an unguarded second tick reads stale lastRunAt and enqueues again.
+    const [a, b] = await Promise.all([s.tick(queue), s.tick(queue)]);
+    expect(a.length + b.length).toBe(1);                          // exactly one fire
+    expect(queue.list().map((t) => t.task)).toEqual(["only once"]);
+  });
+
   it("persists lastRunAt to the separate state file so a restart does not refire", async () => {
     await writeDefs([{ id: "digest", task: "digest", kind: "daily", at: "07:00" }]);
     const now = local(8, 0);
