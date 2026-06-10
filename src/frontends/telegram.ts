@@ -9,16 +9,16 @@
  */
 import { createUnifiedClient } from "../client/unified.js";
 import type { AgentEvent } from "../types.js";
+import { parseAllowSet, mdBoldHeadings, toolEmoji as _toolEmoji, formatStepEvent } from "./shared.js";
 
 // ─── Pure helpers (exported for unit tests — no I/O, no network) ───────────
 
 /** Parse a comma-separated env value into a Set<number>. Blanks and NaN ignored. */
 export function parseAllowedIds(env: string | undefined): Set<number> {
-  if (!env) return new Set();
   const ids = new Set<number>();
-  for (const part of env.split(",")) {
-    const n = Number(part.trim());
-    if (part.trim() !== "" && !Number.isNaN(n)) ids.add(n);
+  for (const id of parseAllowSet(env)) {
+    const n = Number(id);
+    if (!Number.isNaN(n)) ids.add(n);
   }
   return ids;
 }
@@ -46,23 +46,11 @@ export function extractMessage(
  * lenient about `(). -` etc.; a parse failure falls back to plain text.
  */
 export function toTelegramMarkdown(md: string): string {
-  return md
-    .replace(/\*\*(.+?)\*\*/gs, "*$1*")       // **bold** → *bold*
-    .replace(/^#{1,6}\s+(.+)$/gm, "*$1*");    // # heading → *heading*
+  return mdBoldHeadings(md);
 }
 
 /** Emoji for a (namespaced) tool name — used in the live Telegram step tracker. */
-export function toolEmoji(name: string): string {
-  if (name.includes("jury")) return "⚖️";
-  if (name.includes("council")) return "🏛️";
-  if (name.includes("grok_search") || name.includes("search")) return "🔍";
-  if (name.includes("perplexity") || name.includes("ask")) return "🔎";
-  if (name.includes("judge")) return "🧑‍⚖️";
-  if (name.includes("recall")) return "🧠";
-  if (name.includes("log")) return "💾";
-  if (name.includes("reason") || name.includes("think")) return "🤔";
-  return "🔧";
-}
+export { _toolEmoji as toolEmoji };
 
 // ─── Telegram API helpers ───────────────────────────────────────────────────
 
@@ -158,11 +146,9 @@ async function main(): Promise<void> {
           void editMessage(token, msg.chatId, statusId, `🤔 working…\n${steps.join("\n")}`);
         };
         const onEvent = (e: AgentEvent) => {
-          if (e.type === "step") steps.push(`⚙️ step ${e.iteration}`);
-          else if (e.type === "assistant" && e.toolCalls.length)
-            for (const c of e.toolCalls) steps.push(`${toolEmoji(c.name)} ${c.name}…`);
-          else if (e.type === "tool-result") steps.push(`   ✅ ${e.name}`);
-          else return;
+          const line = formatStepEvent(e);
+          if (line === null) return;
+          steps.push(line);
           flush();
         };
         try {

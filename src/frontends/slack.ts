@@ -9,18 +9,13 @@
  */
 import { createUnifiedClient, type UnifiedClient } from "../client/unified.js";
 import type { AgentEvent } from "../types.js";
+import { parseAllowSet, mdBoldHeadings, toolEmoji as _toolEmoji, formatStepEvent } from "./shared.js";
 
 // ─── Pure helpers (exported for unit tests — no I/O, no network) ───────────
 
 /** Parse a comma-separated env value into a Set<string> of Slack user IDs. Blanks ignored. */
 export function parseAllowedSlackIds(env: string | undefined): Set<string> {
-  if (!env) return new Set();
-  const ids = new Set<string>();
-  for (const part of env.split(",")) {
-    const id = part.trim();
-    if (id !== "") ids.add(id);
-  }
-  return ids;
+  return parseAllowSet(env);
 }
 
 /** Fail-closed: empty allowlist → deny all. */
@@ -65,26 +60,13 @@ export function truncateForSlack(text: string): string {
  * left untouched to avoid corrupting `&`-containing URLs/query strings.
  */
 export function toSlackMrkdwn(md: string): string {
-  return md
-    .replace(/</g, "&lt;")                                  // escape literal angle brackets first
-    .replace(/>/g, "&gt;")
-    .replace(/\*\*(.+?)\*\*/gs, "*$1*")                     // **bold** → *bold*
-    .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")                   // # heading → *heading*
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "<$2|$1>"); // [t](u) → <u|t>
+  return mdBoldHeadings(
+    md.replace(/</g, "&lt;").replace(/>/g, "&gt;"),
+  ).replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "<$2|$1>");
 }
 
 /** Emoji for a (namespaced) tool name — used in the live Slack step tracker. */
-export function toolEmoji(name: string): string {
-  if (name.includes("jury")) return "⚖️";
-  if (name.includes("council")) return "🏛️";
-  if (name.includes("grok_search") || name.includes("search")) return "🔍";
-  if (name.includes("perplexity") || name.includes("ask")) return "🔎";
-  if (name.includes("judge")) return "🧑‍⚖️";
-  if (name.includes("recall")) return "🧠";
-  if (name.includes("log")) return "💾";
-  if (name.includes("reason") || name.includes("think")) return "🤔";
-  return "🔧";
-}
+export { _toolEmoji as toolEmoji };
 
 // ─── Slack Web API helpers ──────────────────────────────────────────────────
 
@@ -165,11 +147,9 @@ async function handleEvent(
     void updateMessage(token, msg.channel, statusTs, `🤔 working…\n${steps.join("\n")}`);
   };
   const onEvent = (e: AgentEvent) => {
-    if (e.type === "step") steps.push(`⚙️ step ${e.iteration}`);
-    else if (e.type === "assistant" && e.toolCalls.length)
-      for (const c of e.toolCalls) steps.push(`${toolEmoji(c.name)} ${c.name}…`);
-    else if (e.type === "tool-result") steps.push(`   ✅ ${e.name}`);
-    else return;
+    const line = formatStepEvent(e);
+    if (line === null) return;
+    steps.push(line);
     flush();
   };
   try {
