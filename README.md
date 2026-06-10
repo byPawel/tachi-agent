@@ -215,6 +215,57 @@ const result = await createOrchestrator({
 
 Implement `Driver` / `ToolHost` / `Memory` (see `src/types.ts`) to extend; no core changes required.
 
+## Configuration
+
+All configuration is via environment variables (e.g. in `.env`, loaded with `node --env-file=.env`).
+
+### Orchestrator
+| Variable | Default | Purpose |
+|---|---|---|
+| `TACHI_ALLOW` | curated council/search/memory set | Comma-separated tool allowlist (exact names or `server_` prefixes). `tachibot_,dokoro_` exposes everything. |
+| `TACHI_FORCE_SEARCH` | off | `1/true/yes/on` → force a grounding search before reasoning on EVERY task. |
+| `TACHI_MAX_EMPTY_TURNS` | `2` | Consecutive blank model turns nudged through before halting as `empty-response`. |
+| `TACHI_CALL_TIMEOUT_MS` | `120000` | Per-MCP-tool-call timeout. |
+| `TACHI_MAX_TOOL_RESULT_CHARS` | `30000` | Truncate tool results before they reach the model context (`0` disables). |
+| `TACHI_CONTEXT_INSPECT` | off | `1` → emit per-turn context JSONL to `.tachi/context-inspect/`. |
+
+### Drivers (local brain)
+| Variable | Default | Purpose |
+|---|---|---|
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama endpoint. |
+| `OLLAMA_MODEL` | `qwen2.5` | Local model name. |
+| `OLLAMA_NUM_CTX` | `8192` | Context window override. |
+| `HERMES_BASE_URL` / `HERMES_MODEL` / `HERMES_API_KEY` | unset | Optional Hermes (OpenAI-compatible) driver. |
+
+### MCP servers
+| Variable | Default | Purpose |
+|---|---|---|
+| `DOKORO_CMD` | unset | Command line to spawn the dokoro memory MCP server. |
+| `TACHIBOT_CMD` | unset | Command line to spawn the tachibot multi-model MCP server. |
+
+### Frontends
+| Variable | Default | Purpose |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USER_IDS` | required | Bot token + comma-separated numeric allowlist (fail-closed: empty = refuse to start). |
+| `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` / `SLACK_ALLOWED_USER_IDS` | required | Bot + Socket-Mode app token + user-ID allowlist (fail-closed). |
+
+### Gateway / daemon
+| Variable | Default | Purpose |
+|---|---|---|
+| `GATEWAY_TOKEN` / `GATEWAY_TOKENS` | required | Bearer auth (single token, or `name:token` pairs for tenants). Daemon refuses to start without one. |
+| `GATEWAY_PORT` | `8787` | Gateway listen port (`tachi-agent-gateway`). |
+| `TACHI_DAEMON_URL` | unset | When set, thin clients (cli/repl/telegram/slack) attach to the daemon instead of building a local runtime. |
+| `TACHI_DAEMON_PORT` | `8787` | Daemon listen port. |
+| `TACHI_SESSION_TTL_MS` | `600000` | Idle TTL before an unattached finished run is GC'd. |
+| `TACHI_SESSION_BUFFER_MAX` | `10000` | Per-run SSE replay ring-buffer cap. |
+| `TACHI_DRAIN_TIMEOUT_MS` | `30000` | Hard upper bound on graceful-shutdown drain. |
+| `TACHI_DEBUG` | off | Verbose stderr diagnostics. |
+
+### Swarm
+| Variable | Default | Purpose |
+|---|---|---|
+| `TACHI_SWARM_ROLES` | built-in roles | Override the swarm role lineup. |
+
 ## License
 
 MIT — see [LICENSE](LICENSE). tachi-agent is a pluggable client meant to be embedded by other agents; the council's provider keys and the persistent-memory backend live behind the MCP wire (`tachibot-mcp`, `dokoro`), so an MIT client and the server it calls compose cleanly.
