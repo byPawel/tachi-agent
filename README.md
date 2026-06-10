@@ -1,5 +1,7 @@
 # tachi-agent
 
+**tachi-agent — local-first agent runtime.** Dokoro gives it memory. TachiBot gives it better judgment. (TachiBot orchestrates models; tachi-agent orchestrates work.)
+
 A **local-first orchestration agent** — a small, pluggable ReAct hub that fuses
 **dokoro** (persistent memory) with **tachibot** (multi-model council) over MCP.
 Its default brain runs **100% local** (Qwen2.5 via Ollama), so multi-model
@@ -9,6 +11,21 @@ The agent loop lives in the **client**, never inside an MCP server — keeping t
 hub small, embeddable, and free of nested-loop coupling.
 
 📖 **Docs:** **[bypawel.github.io/tachi-agent](https://bypawel.github.io/tachi-agent/)** · built on [dokoro](https://github.com/byPawel/dokoro) (memory) + [tachibot](https://tachibot.com) (council).
+
+## Stack
+
+```
+Frontends (CLI · REPL · Telegram · Slack · Gateway · Claude Code)
+        │
+        ▼
+tachi-agent  ──  ReAct loop · task queue · daemon · swarm
+        │                │
+        ▼                ▼
+    Dokoro           TachiBot
+   (memory)    (council / reasoning)
+```
+
+Dokoro ←→ tachi-agent ←→ TachiBot: memory, runtime, and reasoning as three composable layers.
 
 ## Architecture
 
@@ -61,6 +78,7 @@ same hub without modifying it:
 - **L2.5 — daemon** ✅ Long-running daemon (reuses the gateway) with thin-client **attach** and **session handoff** — durable monotonic event sequence, `Last-Event-ID` buffered replay, refcount-aware TTL/GC, and graceful drain. A `UnifiedClient` makes local and daemon execution interchangeable, so every front-end swaps a single constructor with no behavior change.
 - **L3 — swarm** ✅ Fan out N role-specialized agents (varied prompts/drivers) in parallel on one task, then synthesize via a dedicated synthesizer agent (which can call `tachibot_council` / `tachibot_jury`). Bounded concurrency, quorum warnings, and per-member isolated dokoro sessions. See [Swarm](#swarm).
 - **L4 — standalone** ✅ Persistent task queue + worker, recurring schedules, per-task multi-heart drivers (`TACHI_DRIVER` with `ollama`/`hermes`/`openai`/`openrouter`), proactive Telegram/Slack notifications, durable per-run event logs, and CLI visibility subcommands. See [Standalone mode](#standalone-mode--unattended-operation).
+- **L5 — hermes-parity chat** ✅ Interactive chat by default (bare `tachi-agent` opens the REPL), unified `/commands` surface shared across REPL and Telegram, `--driver`/`--skill` flags, skill bundles (`.tachi/skills/*.md`), and `tachi-agent service install` for macOS launchd autostart.
 
 ## Develop
 
@@ -83,9 +101,22 @@ export DOKORO_CMD="npx -y @devlog-mcp/core"   # optional; omit to run tachibot-o
 
 # 3. build + run
 npm install && npm run build
-node dist/cli.js "verify HEAD against ADR-1..3"
+tachi-agent                         # interactive chat (new in v0.4.0)
+tachi-agent "verify HEAD against ADR-1..3"   # one-shot task
 # dev mode:  npm run dev -- "your task"
 ```
+
+### Golden demo — all three layers in two commands
+
+```bash
+# 1. run a task that exercises memory → reasoning → runtime
+tachi-agent "review this repo, find one risky architectural issue, verify it with the council, remember the decision"
+
+# 2. next session: the agent recalls what you decided
+tachi-agent "what did we decide last time about that architecture risk?"
+```
+
+The first command exercises all three layers: dokoro recalls prior context (memory), tachibot_jury adjudicates the finding (reasoning), and the ReAct loop drives the whole flow (runtime). The second command confirms the decision persists across sessions.
 
 Ctrl-C stops the run cleanly (`AbortSignal` → halts with `aborted`). Progress streams to **stderr**; the final answer prints to **stdout**.
 
@@ -95,12 +126,83 @@ Ctrl-C stops the run cleanly (`AbortSignal` → halts with `aborted`). Progress 
 # from this repo (no registry needed)
 npm install && npm run build && npm link
 
-tachi-agent "verify HEAD against ADR-1..3"   # run a task directly
-tachi-agent task list                         # queue visibility (needs TACHI_DAEMON_URL + GATEWAY_TOKEN)
-tachi-agent runs log <run-id>                 # inspect a run's durable event log
+tachi-agent                            # open interactive chat (default, no args)
+tachi-agent "verify HEAD against ADR-1..3"   # one-shot task
+tachi-agent --driver openai            # chat with the OpenAI heart
+tachi-agent --skill researcher         # chat with the researcher skill active
+tachi-agent task list                  # queue visibility (needs TACHI_DAEMON_URL + GATEWAY_TOKEN)
+tachi-agent runs log <run-id>          # inspect a run's durable event log
 ```
 
 `npm link` (or, once published, `npm i -g tachi-agent`) puts all eight binaries on your PATH: `tachi-agent`, `tachi-agent-daemon`, `tachi-agent-mcp`, `tachi-agent-gateway`, `tachi-agent-telegram`, `tachi-agent-slack`, `tachi-agent-repl`, `tachi-agent-swarm`.
+
+## Interactive chat (v0.4.0)
+
+Bare `tachi-agent` (no arguments) opens an interactive REPL session. Pass `--driver <name>` or `--skill <name>` to start with a specific heart or skill bundle active.
+
+```bash
+tachi-agent                            # opens: tachi ›
+tachi-agent --driver openai            # opens: tachi [openai] ›
+tachi-agent --skill researcher         # opens: tachi [researcher] ›
+```
+
+The prompt shows the active session: `tachi [driver·skill] ›`. History persists at `~/.tachi-agent/repl_history` (capped at 1000 lines). Rewritten tasks (from `/jury`, `/search`, `/think`) are echoed as `→ task` before running.
+
+### Commands (unified across REPL and Telegram)
+
+| Command | What it does |
+|---|---|
+| `/help` | Show the command list |
+| `/tools` | List the agent's available tools |
+| `/model` | Show the current model |
+| `/status` | Show session state (driver, skill, mode) |
+| `/driver <name>\|off` | Set or clear the session driver |
+| `/skill <name>\|off` | Activate or clear a skill bundle |
+| `/reset` | Clear the full session (driver + skill) |
+| `/jury <question>` | Run a cross-model jury verdict via `tachibot_jury` |
+| `/search <query>` | Search with `tachibot_grok_search` or Perplexity |
+| `/think <question>` | Reason step by step over a question |
+| `/task add <text>` | Queue a task on the daemon |
+| `/task list` | List queued tasks |
+| `/task show <id>` | Show task detail |
+| `/schedule list` | List scheduled jobs |
+| `/exit`, `/quit` | Leave (REPL: Ctrl-D also exits) |
+
+Driver precedence: `--driver` flag (or `/driver` command) > skill's `driver` field > `TACHI_DRIVER` env var.
+
+## Skills (recipes)
+
+Skills are markdown files in `.tachi/skills/*.md` (override with `TACHI_SKILLS_DIR`). Each skill narrows what a run sees: its body is appended to the system prompt, `tools` restricts the tool surface (fail-closed), and `driver` suggests a heart.
+
+**Frontmatter format** (exactly as parsed by `src/skills.ts`):
+
+```markdown
+---
+name: researcher
+description: Deep-research mode — searches and synthesizes a cited report.
+tools: tachibot_grok_search, tachibot_perplexity_ask, tachibot_nextThought
+driver: openai
+---
+You are a careful research assistant. Your output must be accurate and traceable.
+...
+```
+
+**Precedence rule:** `/driver` command (or `--driver` flag) > skill's `driver` field > `TACHI_DRIVER`.
+
+Activate a skill:
+```bash
+tachi-agent --skill researcher "explain the CAP theorem trade-offs"
+# or in the REPL:
+# /skill researcher
+```
+
+**Example recipes** are in [`examples/skills/`](examples/skills/):
+- `repo-review.md` — jury + Grok code analysis + dokoro decision record
+- `researcher.md` — search tools + cited-report prompt
+- `nightly-digest.md` — search + jury; driver: openai
+- `fact-checker.md` — Perplexity fact-check protocol
+
+Copy them into your project's `.tachi/skills/` directory (or point `TACHI_SKILLS_DIR` at `examples/skills/` to use them as-is).
 
 ## Swarm
 
@@ -185,7 +287,7 @@ npm run build && node dist/frontends/gateway.js
 
 | Method & path | Purpose |
 |---|---|
-| `POST /runs` `{task, maxIterations?}` | start a run → `202 {run_id}` |
+| `POST /runs` `{task, maxIterations?, driver?, systemPrompt?, allowTools?}` | start a run → `202 {run_id}` |
 | `GET /runs/:id` | run state + final result |
 | `GET /runs/:id/events` | **SSE** stream: `step` / `assistant` / `tool-result` / `final` / `error` / `heartbeat` |
 | `DELETE /runs/:id` | cancel (cooperative abort) |
@@ -216,9 +318,41 @@ event log. Run it under a process supervisor and it operates with nobody attache
 
 ### Run the daemon under a supervisor
 
-Run `node dist/daemon/index.js` under **launchd** (macOS `LaunchAgent` with `KeepAlive`) or
-**systemd** (`Restart=always`). The queue (`.tachi/queue.json`) is crash-safe: a task left
-`running` by a dead daemon is re-queued on restart with its spent attempt counted.
+**macOS (launchd) — the primary path:**
+
+```bash
+export GATEWAY_TOKEN="change-me"
+tachi-agent service install --env-file .env
+# starts at login, restarts on crash
+# logs: ~/Library/Logs/tachi-agent/daemon.log
+tachi-agent service status
+tachi-agent service uninstall
+```
+
+`service install` reads `GATEWAY_TOKEN` + all `TACHI_*` vars from the environment (or from
+`--env-file <path>`), writes a `0600` plist under `~/Library/LaunchAgents`, and bootstraps
+the service with `launchctl`. The `--cwd <dir>` flag sets the working directory (default
+`~/.tachi-agent`).
+
+**Linux (systemd):**
+
+Run `node dist/daemon/index.js` under a systemd unit with `Restart=always`:
+
+```ini
+[Unit]
+Description=tachi-agent daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /path/to/dist/daemon/index.js
+WorkingDirectory=/path/to/.tachi-agent
+EnvironmentFile=/path/to/.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ### Queue work from outside (external cron)
 
@@ -334,6 +468,11 @@ All configuration is via environment variables (e.g. in `.env`, loaded with `nod
 |---|---|---|
 | `DOKORO_CMD` | unset | Command line to spawn the dokoro memory MCP server. |
 | `TACHIBOT_CMD` | unset | Command line to spawn the tachibot multi-model MCP server. |
+
+### Skills
+| Variable | Default | Purpose |
+|---|---|---|
+| `TACHI_SKILLS_DIR` | `.tachi/skills` | Directory of `*.md` skill files. Malformed files are skipped with a warning. |
 
 ### Frontends
 | Variable | Default | Purpose |
