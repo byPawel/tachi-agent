@@ -25,6 +25,13 @@ export interface DokoroMemoryOptions {
 }
 
 /**
+ * Cap (chars) on the recall query sent to dokoro. The task text is caller-provided
+ * and unbounded — memoryInLoop even feeds assistant output back in as the recall
+ * focus — and a search query past a couple thousand chars adds no recall signal.
+ */
+export const MAX_RECALL_QUERY_CHARS = 2_000;
+
+/**
  * Keep only candidate keys that exist in the tool's JSON-schema `properties`
  * (and are defined). Tools with `additionalProperties:false` reject anything else.
  */
@@ -64,7 +71,11 @@ export class DokoroMemory implements Memory {
   async recall(task: string, signal?: AbortSignal): Promise<string> {
     const tool = this.find(/session_recall$/);
     if (!tool) return "";
-    const args = pickSchemaArgs(tool.parameters, { query: task, limit: this.opts.limit ?? 5, session_id: this.sessionId });
+    const args = pickSchemaArgs(tool.parameters, {
+      query: task.slice(0, MAX_RECALL_QUERY_CHARS),
+      limit: this.opts.limit ?? 5,
+      session_id: this.sessionId,
+    });
     try {
       const out = await this.host.call(tool.name, args, signal);
       return out?.includes("no past sessions") ? "" : out;

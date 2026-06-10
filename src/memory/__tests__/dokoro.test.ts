@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { DokoroMemory, pickSchemaArgs } from "../dokoro.js";
+import { DokoroMemory, pickSchemaArgs, MAX_RECALL_QUERY_CHARS } from "../dokoro.js";
 import type { ToolHost, AgentTool } from "../../types.js";
 
 // Mirrors the REAL dokoro tools as they arrive (double-prefixed under server "dokoro"):
@@ -79,6 +79,28 @@ describe("DokoroMemory bridge (real dokoro round-trip: summary_add ↔ recall)",
     const call = vi.fn(async () => { throw new Error("dokoro down"); });
     const mem = new DokoroMemory(host([SUMMARY], call));
     await expect(mem.log({ task: "t", result: "r" })).resolves.toBeUndefined();
+  });
+
+  // --- recall query bounding (task text can be arbitrarily long; memoryInLoop
+  //     even feeds assistant output back in as the recall focus) ---
+
+  it("bounds an oversized task before sending it as the recall query", async () => {
+    const call = vi.fn(async (_name: string, _args: Record<string, unknown>) => "ctx");
+    const mem = new DokoroMemory(host([RECALL], call));
+    const hugeTask = "find the bug ".repeat(2000); // ~26k chars
+    await mem.recall(hugeTask);
+    const [, args] = call.mock.calls[0];
+    const query = args["query"] as string;
+    expect(query.length).toBeLessThanOrEqual(MAX_RECALL_QUERY_CHARS);
+    expect(query.startsWith("find the bug")).toBe(true); // head kept, tail dropped
+  });
+
+  it("sends a short task through as the query unchanged", async () => {
+    const call = vi.fn(async (_name: string, _args: Record<string, unknown>) => "ctx");
+    const mem = new DokoroMemory(host([RECALL], call));
+    await mem.recall("short task");
+    const [, args] = call.mock.calls[0];
+    expect(args["query"]).toBe("short task");
   });
 
   // --- session_id scoping (the bug: recall was global, not per-session) ---
