@@ -48,6 +48,7 @@ describe("parseCliArgs", () => {
   it("task add flags before text words (flags extracted anywhere)", () => {
     const result = parseCliArgs(["task", "add", "--driver", "openai", "my", "task"]);
     expect(result.command).toBe("task-add");
+    if (result.command !== "task-add") throw new Error("expected task-add"); // narrow the union for tsc
     expect(result.driver).toBe("openai");
     expect(result.text).toBe("my task");
   });
@@ -126,7 +127,7 @@ describe("taskAdd", () => {
 
     expect(capturedUrl).toBe("http://localhost:4000/tasks");
     expect(capturedInit?.method).toBe("POST");
-    const headers = new Headers(capturedInit?.headers as HeadersInit);
+    const headers = new Headers(capturedInit?.headers as Record<string, string>);
     expect(headers.get("Authorization")).toBe("Bearer test-token");
     expect(headers.get("Content-Type")).toBe("application/json");
     const sentBody = JSON.parse(capturedInit?.body as string);
