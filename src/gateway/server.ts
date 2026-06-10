@@ -7,8 +7,8 @@ import { RunRegistry } from "./registry.js";
 import { parseBearer, resolveTenant } from "./auth.js";
 import { formatSse, SSE_HEADERS } from "./sse.js";
 
-const MAX_BODY_BYTES = 64 * 1024; // request body cap — prevents OOM via giant POST
-const MAX_TASK_CHARS = 32 * 1024; // task string cap
+const DEFAULT_MAX_BODY_BYTES = 64 * 1024; // request body cap — prevents OOM via giant POST
+const DEFAULT_MAX_TASK_CHARS = 32 * 1024; // task string cap
 
 export interface GatewayOptions {
   /** Default + hard ceiling on ReAct iterations per run (a request may lower, never exceed). */
@@ -32,6 +32,10 @@ export interface GatewayOptions {
   controls?: GatewayControls;
   /** Token config source. Defaults to process.env. */
   env?: { GATEWAY_TOKENS?: string; GATEWAY_TOKEN?: string };
+  /** Request body cap in bytes (413 past this). Default 64 KiB. */
+  maxBodyBytes?: number;
+  /** Task string cap in characters (400 past this). Default 32 KiB. */
+  maxTaskChars?: number;
 }
 
 /** Mutable drain control surface shared between the gateway and its owner (the daemon). */
@@ -59,12 +63,12 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 }
 
 /** Read a JSON body with a hard byte cap (throws HttpError 413 if exceeded). */
-async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(req: http.IncomingMessage, cap: number): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const c of req) {
     total += (c as Buffer).length;
-    if (total > MAX_BODY_BYTES) throw new HttpError(413, "request body too large");
+    if (total > cap) throw new HttpError(413, "request body too large");
     chunks.push(c as Buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
@@ -82,6 +86,8 @@ export function createGatewayServer(
   const maxConcurrent = opts.maxConcurrentPerTenant ?? 16;
   const iterationCeiling = opts.maxIterations ?? 50;
   const controls = opts.controls;
+  const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const maxTaskChars = opts.maxTaskChars ?? DEFAULT_MAX_TASK_CHARS;
   // Expose the registry's TTL/GC sweep to the daemon (drives periodic memory reclaim).
   if (controls) controls.collect = (ttlMs: number) => registry.collect(ttlMs);
 
@@ -96,13 +102,13 @@ export function createGatewayServer(
       // POST /runs
       if (req.method === "POST" && parts.length === 1 && parts[0] === "runs") {
         if (controls?.draining) { req.resume(); return json(res, 503, { error: "server draining" }); } // reject new work (drain the body so the socket frees)
-        if (Number(req.headers["content-length"] ?? 0) > MAX_BODY_BYTES) {
+        if (Number(req.headers["content-length"] ?? 0) > maxBodyBytes) {
           return json(res, 413, { error: "request body too large" });
         }
-        const body = await readJson(req);
+        const body = await readJson(req, maxBodyBytes);
         const task = typeof body.task === "string" ? body.task.trim() : "";
         if (!task) return json(res, 400, { error: "task required" });
-        if (task.length > MAX_TASK_CHARS) return json(res, 400, { error: "task too long" });
+        if (task.length > maxTaskChars) return json(res, 400, { error: "task too long" });
         if (registry.runningCount(tenant.tenant) >= maxConcurrent) {
           return json(res, 429, { error: "too many concurrent runs" });
         }
