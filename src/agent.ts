@@ -118,7 +118,11 @@ export class Orchestrator {
           toolCalls.push({ name: searchTool.name, args: { query: task }, result });
           this.opts.onEvent?.({ type: "tool-result", name: searchTool.name, result });
         }
-      } else if (explicitlyRequestsGrok(task)) {
+      } else if (explicitlyRequestsGrok(task) && !this.opts.allowTools) {
+        // Sentinel only for GLOBAL config gaps (no grok_search exposed at all).
+        // When a skill's allowTools narrowed the surface, grounding silently
+        // no-ops — injecting "do not substitute" advice would steer the model
+        // away from grounding entirely, which is worse than the no-op.
         const result = "[Grok search unavailable: the user explicitly requested Grok/XAI, but no tachibot_grok_search tool is exposed. Do not silently substitute Perplexity; say Grok is unavailable or adjust TACHI_ALLOW/config.]";
         grounding = `\n\n--- Grounding search unavailable ---\n${result}`;
         toolCalls.push({ name: "tachibot_grok_search", args: { query: task }, result });
