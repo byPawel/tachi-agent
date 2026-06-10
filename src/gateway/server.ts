@@ -7,6 +7,7 @@ import { RunRegistry } from "./registry.js";
 import { parseBearer, resolveTenant } from "./auth.js";
 import { formatSse, SSE_HEADERS } from "./sse.js";
 import type { RunEventLog } from "../daemon/eventlog.js";
+import type { TaskQueue } from "../daemon/queue.js";
 
 const DEFAULT_MAX_BODY_BYTES = 64 * 1024; // request body cap — prevents OOM via giant POST
 const DEFAULT_MAX_TASK_CHARS = 32 * 1024; // task string cap
@@ -39,6 +40,8 @@ export interface GatewayOptions {
   maxTaskChars?: number;
   /** Optional durable event log — every registry append is also persisted (fire-and-forget). */
   eventLog?: RunEventLog;
+  /** Optional persistent task queue — enables the /tasks endpoints (daemon mode). */
+  queue?: TaskQueue;
 }
 
 /** Mutable drain control surface shared between the gateway and its owner (the daemon). */
@@ -141,6 +144,43 @@ export function createGatewayServer(
           )
           .catch((fatal) => console.error("[gateway] run finalize error:", fatal));
         return json(res, 202, { run_id: record.id, status: "running" });
+      }
+
+      // ── /tasks — persistent queue (only when the owner wired a queue, i.e. daemon mode) ──
+      // The queue is single-tenant by design in v1 (any authorized bearer sees all tasks).
+      if (opts.queue && parts[0] === "tasks") {
+        const queue = opts.queue;
+
+        // POST /tasks  → enqueue (external cron's entry point)
+        if (req.method === "POST" && parts.length === 1) {
+          if (controls?.draining) { req.resume(); return json(res, 503, { error: "server draining" }); }
+          const body = await readJson(req, maxBodyBytes);
+          const task = typeof body.task === "string" ? body.task.trim() : "";
+          if (!task) return json(res, 400, { error: "task required" });
+          if (task.length > maxTaskChars) return json(res, 400, { error: "task too long" });
+          const maxAttempts =
+            typeof body.maxAttempts === "number" && body.maxAttempts >= 1
+              ? Math.floor(body.maxAttempts)
+              : undefined;
+          const record = queue.enqueue(task, { maxAttempts });
+          await queue.flush().catch((e) => console.error("[gateway] queue flush error:", e));
+          return json(res, 202, { task_id: record.id, status: record.status });
+        }
+
+        // GET /tasks  → list (id/status/attempts summaries)
+        if (req.method === "GET" && parts.length === 1) {
+          const tasks = queue.list().map(({ id, status, attempts, maxAttempts, createdAt, updatedAt }) => ({
+            id, status, attempts, maxAttempts, createdAt, updatedAt,
+          }));
+          return json(res, 200, { tasks });
+        }
+
+        // GET /tasks/:id  → full record
+        if (req.method === "GET" && parts.length === 2) {
+          const t = queue.get(parts[1]);
+          if (!t) return json(res, 404, { error: "not found" });
+          return json(res, 200, t);
+        }
       }
 
       // /runs/:id  and  /runs/:id/events
