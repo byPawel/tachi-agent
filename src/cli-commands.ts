@@ -22,11 +22,12 @@ export interface CliDeps {
 // ---------------------------------------------------------------------------
 
 export type ParsedCliArgs =
+  | { command: "chat"; driver?: string; skill?: string }
+  | { command: "run"; text: string; driver?: string; skill?: string }
   | { command: "task-add"; text: string; driver?: string; maxAttempts?: number }
   | { command: "task-list" }
   | { command: "task-show"; id: string }
-  | { command: "runs-log"; id: string }
-  | { command: "run"; text: string };
+  | { command: "runs-log"; id: string };
 
 // ---------------------------------------------------------------------------
 // parseCliArgs
@@ -40,7 +41,12 @@ export type ParsedCliArgs =
  *   task list
  *   task show <id>
  *   runs log <id>
- *   <anything else>  →  { command: "run", text: argv.join(" ") }
+ *   [--driver <name>] [--skill <name>]            →  { command: "chat", ... }
+ *   <text...> [--driver <name>] [--skill <name>]  →  { command: "run", ... }
+ *
+ * `--driver`/`--skill` are extracted from any position; with no remaining text
+ * the CLI opens interactive chat (chat-by-default), otherwise it is a one-shot
+ * run. A flag missing its value is left in the text verbatim (fail-soft).
  */
 export function parseCliArgs(argv: string[]): ParsedCliArgs {
   const [first, second, ...rest] = argv;
@@ -81,8 +87,35 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
     };
   }
 
-  // Fallback: existing "run a task directly" behaviour
-  return { command: "run", text: argv.join(" ") };
+  // Fallback: chat-by-default / one-shot run, with --driver/--skill extracted
+  // from any position. Remaining text empty → interactive chat.
+  let driver: string | undefined;
+  let skill: string | undefined;
+  const textTokens: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--driver" && argv[i + 1] !== undefined) {
+      driver = argv[++i];
+    } else if (argv[i] === "--skill" && argv[i + 1] !== undefined) {
+      skill = argv[++i];
+    } else {
+      textTokens.push(argv[i]);
+    }
+  }
+  const text = textTokens.join(" ").trim();
+
+  if (!text) {
+    return {
+      command: "chat",
+      ...(driver !== undefined ? { driver } : {}),
+      ...(skill !== undefined ? { skill } : {}),
+    };
+  }
+  return {
+    command: "run",
+    text,
+    ...(driver !== undefined ? { driver } : {}),
+    ...(skill !== undefined ? { skill } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------

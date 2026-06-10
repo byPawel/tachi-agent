@@ -1,15 +1,26 @@
 #!/usr/bin/env node
-/** CLI entry point — progress to stderr, final answer to stdout. */
+/** CLI entry point — progress to stderr, final answer to stdout. No args opens chat. */
 import { createUnifiedClient } from "./client/unified.js";
 import type { AgentEvent } from "./types.js";
 import { parseCliArgs, taskAdd, taskList, taskShow, runsLog, type CliDeps } from "./cli-commands.js";
+import { resolveRunOptions, type ChatSession } from "./chat-commands.js";
+import { loadSkills, findSkill } from "./skills.js";
+import { runRepl } from "./frontends/repl.js";
 
 async function main() {
   const argv = process.argv.slice(2);
   const parsed = parseCliArgs(argv);
 
   // -------------------------------------------------------------------------
-  // New subcommands: task-add / task-list / task-show / runs-log
+  // Interactive chat (default with no args) — full REPL with /commands
+  // -------------------------------------------------------------------------
+  if (parsed.command === "chat") {
+    await runRepl({ driver: parsed.driver, skill: parsed.skill });
+    return;
+  }
+
+  // -------------------------------------------------------------------------
+  // Subcommands: task-add / task-list / task-show / runs-log
   // -------------------------------------------------------------------------
   if (parsed.command !== "run") {
     const deps: CliDeps = {
@@ -36,12 +47,26 @@ async function main() {
   }
 
   // -------------------------------------------------------------------------
-  // Existing behaviour — run a task (byte-identical to before)
+  // One-shot run — optional --driver/--skill carried into the run options
   // -------------------------------------------------------------------------
-  const task = argv.join(" ").trim();
+  const task = parsed.text.trim();
   if (!task) {
-    console.error('Usage: tachi-agent "<task>"');
+    console.error('Usage: tachi-agent "<task>" [--driver <name>] [--skill <name>]');
     process.exit(1);
+  }
+
+  // Resolve the skill up front so an unknown name fails actionably, pre-run.
+  const session: ChatSession = {};
+  if (parsed.driver) session.driver = parsed.driver;
+  if (parsed.skill) {
+    const skills = await loadSkills();
+    const skill = findSkill(skills, parsed.skill);
+    if (!skill) {
+      const names = skills.map((s) => s.name).join(", ") || "(none — add .md files under .tachi/skills)";
+      console.error(`✖ unknown skill "${parsed.skill}" — available: ${names}`);
+      process.exit(1);
+    }
+    session.skill = skill;
   }
 
   // Local-or-daemon: with TACHI_DAEMON_URL set, delegate to the daemon over the gateway;
@@ -86,7 +111,8 @@ async function main() {
   );
 
   try {
-    const res = await client.run(task, { signal: controller.signal, onEvent });
+    // Driver precedence (--driver > skill.driver) lives in resolveRunOptions.
+    const res = await client.run(task, { signal: controller.signal, onEvent, ...resolveRunOptions(session) });
     console.log("\n" + res.answer); // final answer to STDOUT (progress went to stderr)
   } finally {
     await client.close(); // always tear down MCP child processes (local) / no-op (daemon)

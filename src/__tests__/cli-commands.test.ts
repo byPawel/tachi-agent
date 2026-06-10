@@ -70,15 +70,66 @@ describe("parseCliArgs", () => {
     expect(result).toMatchObject({ command: "run", text: "summarize my day" });
   });
 
-  it("falls back to run for empty argv", () => {
-    const result = parseCliArgs([]);
-    expect(result).toMatchObject({ command: "run", text: "" });
+  it("empty argv opens chat", () => {
+    expect(parseCliArgs([])).toEqual({ command: "chat" });
   });
 
   it("falls back to run for single non-keyword word", () => {
     const result = parseCliArgs(["hello"]);
     expect(result).toMatchObject({ command: "run", text: "hello" });
   });
+
+  // --- chat-by-default + --driver/--skill flags ------------------------------
+
+  it("--driver alone opens chat with the driver", () => {
+    expect(parseCliArgs(["--driver", "openai"])).toEqual({ command: "chat", driver: "openai" });
+  });
+
+  it("--skill alone opens chat with the skill", () => {
+    expect(parseCliArgs(["--skill", "researcher"])).toEqual({ command: "chat", skill: "researcher" });
+  });
+
+  it("--driver and --skill together open chat with both", () => {
+    expect(parseCliArgs(["--driver", "openai", "--skill", "researcher"])).toEqual({
+      command: "chat",
+      driver: "openai",
+      skill: "researcher",
+    });
+  });
+
+  it("--skill with trailing text is a one-shot run carrying the skill", () => {
+    expect(parseCliArgs(["--skill", "researcher", "do", "x"])).toEqual({
+      command: "run",
+      text: "do x",
+      skill: "researcher",
+    });
+  });
+
+  it("flags are extracted from any position around run text", () => {
+    expect(parseCliArgs(["do", "--driver", "openai", "x"])).toEqual({
+      command: "run",
+      text: "do x",
+      driver: "openai",
+    });
+    expect(parseCliArgs(["do", "x", "--skill", "coder"])).toEqual({
+      command: "run",
+      text: "do x",
+      skill: "coder",
+    });
+  });
+
+  it("a trailing flag without a value stays in the run text", () => {
+    expect(parseCliArgs(["say", "--driver"])).toEqual({ command: "run", text: "say --driver" });
+  });
+
+  it("task subcommands win over flag extraction (existing shapes unchanged)", () => {
+    expect(parseCliArgs(["task", "add", "t", "--driver", "openai"])).toMatchObject({
+      command: "task-add",
+      text: "t",
+      driver: "openai",
+    });
+  });
+
 });
 
 // ---------------------------------------------------------------------------
