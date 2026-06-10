@@ -366,6 +366,25 @@ describe("runsLog", () => {
     expect(deps.lines[0]).toContain("no events for run-empty");
   });
 
+  it("explains the LOCAL log dir when empty and TACHI_DAEMON_URL is set (remote daemon)", async () => {
+    const deps = makeDeps({
+      env: { TACHI_RUN_LOG_DIR: tmpDir, TACHI_DAEMON_URL: "http://remote:4000" },
+    });
+    await runsLog(deps, "run-remote");
+    expect(deps.lines).toHaveLength(1);
+    expect(deps.lines[0]).toContain("no events for run-remote");
+    expect(deps.lines[0]).toContain(`LOCAL ${tmpDir}`);
+    expect(deps.lines[0]).toContain("TACHI_DAEMON_URL is set");
+    expect(deps.lines[0]).toContain("TACHI_RUN_LOG_DIR");
+  });
+
+  it("keeps the plain no-events message when TACHI_DAEMON_URL is unset", async () => {
+    const deps = makeDeps({ env: { TACHI_RUN_LOG_DIR: tmpDir } });
+    await runsLog(deps, "run-local");
+    expect(deps.lines).toHaveLength(1);
+    expect(deps.lines[0]).toBe("no events for run-local");
+  });
+
   it("includes seq and ISO timestamp in each line", async () => {
     await writeLog("run-6", [
       { type: "assistant", content: "hello", toolCalls: [] },

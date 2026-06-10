@@ -213,13 +213,24 @@ function formatEventDetail(event: GatewayEvent): string {
 }
 
 export async function runsLog(deps: CliDeps, runId: string): Promise<void> {
+  const dir = deps.env.TACHI_RUN_LOG_DIR ?? ".tachi/runs";
   const log = new RunEventLog(
     deps.env.TACHI_RUN_LOG_DIR ? { dir: deps.env.TACHI_RUN_LOG_DIR } : {},
   );
   const events = await log.read(runId);
 
   if (events.length === 0) {
-    deps.stdout(`no events for ${runId}`);
+    // With a remote daemon the run's events live on the daemon host, not here —
+    // a bare "no events" would be silently misleading, so say why.
+    if (deps.env.TACHI_DAEMON_URL) {
+      deps.stdout(
+        `no events for ${runId} — note: runs log reads the LOCAL ${dir} directory; ` +
+          `for a remote daemon (TACHI_DAEMON_URL is set) run this on the daemon host ` +
+          `or set TACHI_RUN_LOG_DIR to a shared path`,
+      );
+    } else {
+      deps.stdout(`no events for ${runId}`);
+    }
     return;
   }
 
