@@ -130,6 +130,10 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("doctor parses to the doctor command", () => {
+    expect(parseCliArgs(["doctor"])).toEqual({ command: "doctor" });
+  });
+
   // --- service subcommand ----------------------------------------------------
 
   it("service install bare", () => {

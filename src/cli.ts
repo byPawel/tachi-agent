@@ -5,6 +5,7 @@ import type { AgentEvent } from "./types.js";
 import { parseCliArgs, taskAdd, taskList, taskShow, runsLog, type CliDeps } from "./cli-commands.js";
 import { resolveRunOptions, type ChatSession } from "./chat-commands.js";
 import { loadSkills, findSkill } from "./skills.js";
+import { runDoctor } from "./doctor.js";
 import { runRepl } from "./frontends/repl.js";
 import { serviceInstall, serviceUninstall, serviceStatus, type ServiceDeps } from "./service.js";
 import { execFile as execFileCb } from "node:child_process";
@@ -44,6 +45,20 @@ async function main() {
   if (parsed.command === "chat") {
     await runRepl({ driver: parsed.driver, skill: parsed.skill });
     return;
+  }
+
+  // -------------------------------------------------------------------------
+  // doctor — preflight diagnostics; exit 1 when a critical check fails
+  // -------------------------------------------------------------------------
+  if (parsed.command === "doctor") {
+    const { ok } = await runDoctor({
+      env: process.env as Record<string, string | undefined>,
+      fetchImpl: fetch,
+      stdout: (line) => console.log(line),
+      nodeVersion: process.version,
+      loadSkills: () => loadSkills(),
+    });
+    process.exit(ok ? 0 : 1);
   }
 
   // -------------------------------------------------------------------------

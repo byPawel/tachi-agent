@@ -28,6 +28,7 @@ export type ParsedCliArgs =
   | { command: "task-list" }
   | { command: "task-show"; id: string }
   | { command: "runs-log"; id: string }
+  | { command: "doctor" }
   | { command: "service-install"; envFile?: string; cwd?: string }
   | { command: "service-uninstall" }
   | { command: "service-status" }
@@ -41,6 +42,7 @@ export type ParsedCliArgs =
  * Parse process.argv.slice(2) into a typed command descriptor.
  *
  * Recognised shapes:
+ *   doctor
  *   task add <text...> [--driver <name>] [--max-attempts <n>]
  *   task list
  *   task show <id>
@@ -55,6 +57,10 @@ export type ParsedCliArgs =
  */
 export function parseCliArgs(argv: string[]): ParsedCliArgs {
   const [first, second, ...rest] = argv;
+
+  if (first === "doctor" && second === undefined) {
+    return { command: "doctor" };
+  }
 
   if (first === "task" && second === "list") {
     return { command: "task-list" };
