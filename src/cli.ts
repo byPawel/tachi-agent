@@ -2,9 +2,43 @@
 /** CLI entry point — progress to stderr, final answer to stdout. */
 import { createUnifiedClient } from "./client/unified.js";
 import type { AgentEvent } from "./types.js";
+import { parseCliArgs, taskAdd, taskList, taskShow, runsLog, type CliDeps } from "./cli-commands.js";
 
 async function main() {
-  const task = process.argv.slice(2).join(" ").trim();
+  const argv = process.argv.slice(2);
+  const parsed = parseCliArgs(argv);
+
+  // -------------------------------------------------------------------------
+  // New subcommands: task-add / task-list / task-show / runs-log
+  // -------------------------------------------------------------------------
+  if (parsed.command !== "run") {
+    const deps: CliDeps = {
+      env: process.env as Record<string, string | undefined>,
+      fetchImpl: fetch,
+      stdout: (line: string) => console.log(line),
+    };
+
+    switch (parsed.command) {
+      case "task-add":
+        await taskAdd(deps, parsed.text ?? "", { driver: parsed.driver, maxAttempts: parsed.maxAttempts });
+        break;
+      case "task-list":
+        await taskList(deps);
+        break;
+      case "task-show":
+        await taskShow(deps, parsed.id);
+        break;
+      case "runs-log":
+        await runsLog(deps, parsed.id);
+        break;
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------------------
+  // Existing behaviour — run a task (byte-identical to before)
+  // -------------------------------------------------------------------------
+  const task = argv.join(" ").trim();
   if (!task) {
     console.error('Usage: tachi-agent "<task>"');
     process.exit(1);
