@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nsName, parseNs, isAllowed, McpToolHost } from "../mcp.js";
+import { nsName, parseNs, isAllowed, McpToolHost, truncateResult, DEFAULT_MAX_RESULT_CHARS } from "../mcp.js";
 
 describe("nsName", () => {
   it("joins server and tool with an underscore", () => {
@@ -39,6 +39,68 @@ describe("isAllowed", () => {
   });
 });
 
+describe("truncateResult", () => {
+  it("returns short text unchanged", () => {
+    expect(truncateResult("hello", 100)).toBe("hello");
+  });
+
+  it("returns text exactly at the cap unchanged", () => {
+    expect(truncateResult("abcde", 5)).toBe("abcde");
+  });
+
+  it("truncates over-cap text and appends a marker counting the removed chars", () => {
+    const out = truncateResult("a".repeat(120), 100);
+    expect(out.startsWith("a".repeat(100))).toBe(true);
+    expect(out).toContain("…[truncated 20 chars]");
+  });
+
+  it("disables truncation when maxChars <= 0", () => {
+    const big = "x".repeat(1000);
+    expect(truncateResult(big, 0)).toBe(big);
+    expect(truncateResult(big, -1)).toBe(big);
+  });
+
+  it("has a sane positive default cap", () => {
+    expect(DEFAULT_MAX_RESULT_CHARS).toBeGreaterThan(1000);
+  });
+});
+
+/** A fake MCP Client that resolves with the given text. */
+function textClient(text: string) {
+  return {
+    callTool: async () => ({ content: [{ type: "text", text }] }),
+    close: async () => {},
+  };
+}
+
+describe("McpToolHost.call result truncation", () => {
+  it("truncates a huge tool result to maxResultChars with a marker (council outputs must not flood the local context)", async () => {
+    const host = hostWith("tachibot", textClient("z".repeat(500)), undefined, { maxResultChars: 100 });
+    const out = await host.call("tachibot_jury", { q: "x" });
+    expect(out.length).toBeLessThan(200);
+    expect(out.startsWith("z".repeat(100))).toBe(true);
+    expect(out).toContain("…[truncated 400 chars]");
+  });
+
+  it("passes results under the cap through unchanged", async () => {
+    const host = hostWith("tachibot", textClient("short answer"), undefined, { maxResultChars: 100 });
+    await expect(host.call("tachibot_jury", {})).resolves.toBe("short answer");
+  });
+
+  it("maxResultChars <= 0 disables truncation", async () => {
+    const host = hostWith("tachibot", textClient("z".repeat(500)), undefined, { maxResultChars: 0 });
+    const out = await host.call("tachibot_jury", {});
+    expect(out).toBe("z".repeat(500));
+  });
+
+  it("applies the default cap when maxResultChars is unset", async () => {
+    const host = hostWith("tachibot", textClient("z".repeat(DEFAULT_MAX_RESULT_CHARS + 50)));
+    const out = await host.call("tachibot_jury", {});
+    expect(out).toContain("…[truncated 50 chars]");
+    expect(out.length).toBeLessThan(DEFAULT_MAX_RESULT_CHARS + 50);
+  });
+});
+
 /** A fake MCP Client whose callTool hangs until aborted (honours options.signal). */
 function hangingClient() {
   return {
@@ -54,8 +116,13 @@ function hangingClient() {
 }
 
 /** Reach into the private clients map to inject a fake without a live transport. */
-function hostWith(server: string, client: unknown, callTimeoutMs?: number): McpToolHost {
-  const host = new McpToolHost({ callTimeoutMs });
+function hostWith(
+  server: string,
+  client: unknown,
+  callTimeoutMs?: number,
+  extra?: { maxResultChars?: number },
+): McpToolHost {
+  const host = new McpToolHost({ callTimeoutMs, ...extra });
   (host as unknown as { clients: Map<string, unknown> }).clients.set(server, client);
   return host;
 }

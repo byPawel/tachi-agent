@@ -22,6 +22,34 @@ export interface McpToolHostOptions {
   allow?: string[];
   /** Per-call wall-clock timeout in ms. A hung MCP tool MUST NOT block the run. Default 120_000. */
   callTimeoutMs?: number;
+  /**
+   * Cap (chars) on a single tool's text result before it is handed to the model.
+   * Council/search outputs can be huge and would flood a small local model's
+   * context; over-cap results are cut with a `…[truncated N chars]` marker.
+   * <= 0 disables truncation. Default DEFAULT_MAX_RESULT_CHARS (overridable via
+   * the TACHI_MAX_TOOL_RESULT_CHARS env var; explicit option wins).
+   */
+  maxResultChars?: number;
+}
+
+/** Default per-result cap (~7–8k tokens) — generous for legit council output, safe for a 3–8B local context. */
+export const DEFAULT_MAX_RESULT_CHARS = 30_000;
+
+/** Truncate `text` to `maxChars`, appending a marker with the removed length. <= 0 disables. */
+export function truncateResult(text: string, maxChars: number): string {
+  if (maxChars <= 0 || text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + `\n…[truncated ${text.length - maxChars} chars]`;
+}
+
+/** Resolve the result cap: explicit option > TACHI_MAX_TOOL_RESULT_CHARS env > default. */
+function resolveMaxResultChars(opt: number | undefined): number {
+  if (opt !== undefined) return opt;
+  const raw = process.env.TACHI_MAX_TOOL_RESULT_CHARS;
+  if (raw !== undefined && raw.trim() !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return DEFAULT_MAX_RESULT_CHARS;
 }
 
 /**
@@ -133,7 +161,8 @@ export class McpToolHost implements ToolHost {
         .filter((p) => p?.type === "text" && typeof p.text === "string")
         .map((p) => p.text)
         .join("\n");
-      return text || JSON.stringify(res.content ?? res);
+      // Cap the result before it reaches the model's context (council outputs can be huge).
+      return truncateResult(text || JSON.stringify(res.content ?? res), resolveMaxResultChars(this.opts.maxResultChars));
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onCallerAbort);
