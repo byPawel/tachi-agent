@@ -51,11 +51,13 @@ export function servicePaths(home: string): ServicePathSet {
 /**
  * Parse a dotenv-style file: KEY=VALUE per line; `export ` prefixes, comments
  * and blank lines ignored; single/double surrounding quotes stripped; values
- * may contain `=`. No interpolation — literal values only.
+ * may contain `=`. CRLF line endings (Windows-edited files) are stripped
+ * explicitly — a trailing `\r` on GATEWAY_TOKEN would silently break daemon
+ * auth. No interpolation — literal values only.
  */
 export function parseEnvFile(raw: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of raw.split("\n")) {
+  for (const line of raw.split("\n").map((l) => l.replace(/\r$/, ""))) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const body = trimmed.startsWith("export ") ? trimmed.slice("export ".length) : trimmed;

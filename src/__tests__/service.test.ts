@@ -82,6 +82,10 @@ describe("parseEnvFile", () => {
   it("skips lines without =", () => {
     expect(parseEnvFile("not-an-assignment\nE=5")).toEqual({ E: "5" });
   });
+
+  it("strips CRLF line endings (Windows-edited .env files)", () => {
+    expect(parseEnvFile("A=1\r\nB=two\r\n")).toEqual({ A: "1", B: "two" });
+  });
 });
 
 // ---------------------------------------------------------------------------
