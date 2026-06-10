@@ -127,6 +127,44 @@ function hostWith(
   return host;
 }
 
+describe("McpToolHost.call when the MCP server child process has died", () => {
+  /** The SDK rejects in-flight requests with "Connection closed" (McpError -32000)
+   *  and new requests on a closed transport with "Not connected". */
+  function deadClient(message: string) {
+    return {
+      callTool: () => Promise.reject(new Error(message)),
+      close: async () => {},
+    };
+  }
+
+  it("rewrites 'Connection closed' into an actionable error naming the tool and server", async () => {
+    const host = hostWith("tachibot", deadClient("MCP error -32000: Connection closed"));
+    await expect(host.call("tachibot_jury", { q: "x" })).rejects.toThrow(
+      /tool "tachibot_jury".*server "tachibot" disconnected/i,
+    );
+  });
+
+  it("rewrites 'Not connected' the same way and preserves the original message", async () => {
+    const host = hostWith("dokoro", deadClient("Not connected"));
+    const err = await host.call("dokoro_dokoro_session_recall", {}).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/server "dokoro" disconnected/i);
+    expect((err as Error).message).toContain("Not connected");
+  });
+
+  it("passes unrelated tool errors through untouched", async () => {
+    const host = hostWith("tachibot", deadClient("invalid arguments: query is required"));
+    await expect(host.call("tachibot_jury", {})).rejects.toThrow(
+      /^invalid arguments: query is required$/,
+    );
+  });
+
+  it("does not rewrite its own timeout error", async () => {
+    const host = hostWith("tachibot", hangingClient(), 20);
+    await expect(host.call("tachibot_jury", {})).rejects.toThrow(/timed out after 20ms/i);
+  });
+});
+
 describe("McpToolHost.call timeout", () => {
   it("rejects when a tool call hangs past the timeout", async () => {
     const host = hostWith("tachibot", hangingClient(), 30);

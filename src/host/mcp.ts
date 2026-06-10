@@ -41,6 +41,16 @@ export function truncateResult(text: string, maxChars: number): string {
   return text.slice(0, maxChars) + `\n…[truncated ${text.length - maxChars} chars]`;
 }
 
+/**
+ * Does this error mean the MCP server's child process died / the stdio transport
+ * closed? The SDK surfaces this as "Connection closed" (McpError -32000) for
+ * in-flight requests and "Not connected" for requests after close — neither
+ * names the server, so we rewrite them into an actionable per-call message.
+ */
+export function isDisconnectError(message: string): boolean {
+  return /connection closed|not connected|transport.*closed|EPIPE/i.test(message);
+}
+
 /** Resolve the result cap: explicit option > TACHI_MAX_TOOL_RESULT_CHARS env > default. */
 function resolveMaxResultChars(opt: number | undefined): number {
   if (opt !== undefined) return opt;
@@ -163,6 +173,17 @@ export class McpToolHost implements ToolHost {
         .join("\n");
       // Cap the result before it reaches the model's context (council outputs can be huge).
       return truncateResult(text || JSON.stringify(res.content ?? res), resolveMaxResultChars(this.opts.maxResultChars));
+    } catch (e) {
+      // A dead child process surfaces as a bare "Connection closed"/"Not connected" —
+      // rewrite it so the model (and the user) see WHICH server died and what to do.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isDisconnectError(msg)) {
+        throw new Error(
+          `Tool "${name}" failed: MCP server "${server}" disconnected (${msg}). ` +
+          `The server child process likely exited; restart the agent to reconnect.`,
+        );
+      }
+      throw e;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onCallerAbort);
