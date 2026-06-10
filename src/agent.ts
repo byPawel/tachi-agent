@@ -99,7 +99,8 @@ export class Orchestrator {
     const timeoutMs = this.opts.timeoutMs ?? 120_000;
     const maxEmptyTurns = this.opts.maxEmptyTurns ?? MAX_CONSECUTIVE_EMPTY;
     const deadline = Date.now() + timeoutMs;
-    const tools = this.host.tools();
+    const allow = this.opts.allowTools;
+    const tools = allow ? this.host.tools().filter((t) => allow.includes(t.name)) : this.host.tools();
     const toolCalls: RunResult["toolCalls"] = [];
 
     // 1. RECALL — pull relevant prior context from dokoro before reasoning.

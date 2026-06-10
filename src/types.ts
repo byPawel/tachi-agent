@@ -118,6 +118,12 @@ export interface OrchestratorOptions {
    */
   maxEmptyTurns?: number;
   /**
+   * Per-run tool-surface narrowing (skill bundles): only tools whose exact
+   * namespaced name is listed are exposed to the driver and dispatchable.
+   * Fail-closed: unknown names match nothing. Unset → the host's full surface.
+   */
+  allowTools?: string[];
+  /**
    * Opt-in context inspector. When true, the orchestrator emits one JSONL
    * `context_inspect` event to `.tachi/context-inspect/YYYY-MM-DD.jsonl` immediately
    * before EVERY driver.chat call (one per ReAct turn), describing the assembled
