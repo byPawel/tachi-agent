@@ -40,10 +40,12 @@ import { TaskQueue } from "./queue.js";
 import { createWorker } from "./worker.js";
 import { Schedules } from "./schedules.js";
 import { createNotifiers, notifyAll } from "../notify.js";
+import { loadUserEnv } from "../env-bootstrap.js";
 
 const DRAIN_POLL_MS = 200; // how often drain checks whether sinks have cleared
 
 async function main(): Promise<void> {
+  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   if (!process.env.GATEWAY_TOKEN && !process.env.GATEWAY_TOKENS) {
     console.error("Refusing to start without auth: set GATEWAY_TOKEN or GATEWAY_TOKENS.");
     process.exit(1);

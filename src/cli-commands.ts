@@ -29,6 +29,7 @@ export type ParsedCliArgs =
   | { command: "task-show"; id: string }
   | { command: "runs-log"; id: string }
   | { command: "doctor" }
+  | { command: "setup" }
   | { command: "service-install"; envFile?: string; cwd?: string }
   | { command: "service-uninstall" }
   | { command: "service-status" }
@@ -43,6 +44,7 @@ export type ParsedCliArgs =
  *
  * Recognised shapes:
  *   doctor
+ *   setup
  *   task add <text...> [--driver <name>] [--max-attempts <n>]
  *   task list
  *   task show <id>
@@ -60,6 +62,10 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 
   if (first === "doctor" && second === undefined) {
     return { command: "doctor" };
+  }
+
+  if (first === "setup" && second === undefined) {
+    return { command: "setup" };
   }
 
   if (first === "task" && second === "list") {

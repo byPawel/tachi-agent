@@ -10,6 +10,7 @@
 import { createUnifiedClient, type UnifiedClient } from "../client/unified.js";
 import type { AgentEvent } from "../types.js";
 import { parseAllowSet, mdBoldHeadings, toolEmoji as _toolEmoji, formatStepEvent } from "./shared.js";
+import { loadUserEnv } from "../env-bootstrap.js";
 
 // ─── Pure helpers (exported for unit tests — no I/O, no network) ───────────
 
@@ -168,6 +169,7 @@ async function handleEvent(
 }
 
 async function main(): Promise<void> {
+  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   const token = process.env.SLACK_BOT_TOKEN;
   const appToken = process.env.SLACK_APP_TOKEN;
   if (!token) { console.error("SLACK_BOT_TOKEN is required"); process.exit(1); }

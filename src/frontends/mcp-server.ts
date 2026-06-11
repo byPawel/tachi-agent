@@ -18,6 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { buildAgentFromEnv, type AgentRuntime } from "../runtime.js";
+import { loadUserEnv } from "../env-bootstrap.js";
 
 export const DEFAULT_MAX_ITERATIONS = 8;
 export const DEFAULT_TIMEOUT_MS = 90_000;
@@ -80,6 +81,7 @@ export async function runAgentHandler(
 }
 
 async function main(): Promise<void> {
+  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   const runtime = await buildAgentFromEnv(); // singleton — built once, reused
 
   const server = new McpServer({ name: "tachi-agent", version: "0.1.0" });

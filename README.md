@@ -88,6 +88,21 @@ npm test       # vitest — core orchestrator, fully mocked
 npm run build  # tsc → dist/
 ```
 
+## Install (one line, whole stack)
+
+```bash
+curl -fsSL https://bypawel.github.io/tachi-agent/install.sh | sh
+```
+
+Installs Node ≥ 22 and Ollama if missing, then `tachi-agent` + `dokoro` +
+`tachibot-mcp` from npm, and hands off to the interactive wizard
+(`tachi-agent setup`): pick a brain (local Ollama by default, or paste one
+OpenRouter key to power the agent **and** the whole tachibot council), wire
+the MCP servers, generate `GATEWAY_TOKEN`, optionally install the daemon
+service — then run `doctor`. Config lands in `~/.tachi/.env` (chmod 600,
+loaded as defaults by every tachi-agent bin; real env vars win). Re-run the
+wizard anytime with `tachi-agent setup`; skip it with `TACHI_NO_WIZARD=1`.
+
 ## Run
 
 ```bash

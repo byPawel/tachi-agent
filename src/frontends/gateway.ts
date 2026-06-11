@@ -6,8 +6,10 @@
  */
 import { buildAgentFromEnv } from "../runtime.js";
 import { createGatewayServer } from "../gateway/server.js";
+import { loadUserEnv } from "../env-bootstrap.js";
 
 async function main(): Promise<void> {
+  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   if (!process.env.GATEWAY_TOKEN && !process.env.GATEWAY_TOKENS) {
     console.error("Refusing to start without auth: set GATEWAY_TOKEN or GATEWAY_TOKENS.");
     process.exit(1);

@@ -18,6 +18,7 @@ import { parseAllowSet, mdBoldHeadings, toolEmoji as _toolEmoji, formatStepEvent
 import { handleChatLine, resolveRunOptions, type ChatSession, type ChatDeps } from "../chat-commands.js";
 import { loadSkills } from "../skills.js";
 import { taskAdd, taskList, taskShow } from "../cli-commands.js";
+import { loadUserEnv } from "../env-bootstrap.js";
 
 // ─── Pure helpers (exported for unit tests — no I/O, no network) ───────────
 
@@ -166,6 +167,7 @@ export async function editMessage(
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   const tokenRaw = process.env.TELEGRAM_BOT_TOKEN;
   if (!tokenRaw) { console.error("TELEGRAM_BOT_TOKEN is required"); process.exit(1); }
   const token: string = tokenRaw;

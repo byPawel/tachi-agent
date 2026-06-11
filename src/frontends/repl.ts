@@ -231,5 +231,9 @@ export async function runRepl(opts: { driver?: string; skill?: string } = {}): P
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runRepl().catch((e) => { console.error(e); process.exit(1); });
+  // Direct bin invocation (tachi-agent-repl) — the cli entry loads this itself.
+  import("../env-bootstrap.js")
+    .then(({ loadUserEnv }) => loadUserEnv())
+    .then(() => runRepl())
+    .catch((e) => { console.error(e); process.exit(1); });
 }

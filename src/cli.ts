@@ -8,8 +8,11 @@ import { loadSkills, findSkill } from "./skills.js";
 import { runDoctor } from "./doctor.js";
 import { runRepl } from "./frontends/repl.js";
 import { serviceInstall, serviceUninstall, serviceStatus, type ServiceDeps } from "./service.js";
-import { execFile as execFileCb } from "node:child_process";
+import { runSetup } from "./setup.js";
+import { loadUserEnv } from "./env-bootstrap.js";
+import { execFile as execFileCb, spawn } from "node:child_process";
 import { homedir } from "node:os";
+import { randomBytes } from "node:crypto";
 
 /** Real-process ServiceDeps: never-throwing launchctl exec, stdout/stderr split. */
 function makeServiceDeps(): ServiceDeps {
@@ -36,8 +39,62 @@ function makeServiceDeps(): ServiceDeps {
 }
 
 async function main() {
+  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   const argv = process.argv.slice(2);
   const parsed = parseCliArgs(argv);
+
+  // ---------------------------------------------------------------------------
+  // setup — first-run wizard (writes ~/.tachi/.env, offers service install)
+  // ---------------------------------------------------------------------------
+  if (parsed.command === "setup") {
+    const { createInterface } = await import("node:readline/promises");
+    const { mkdir, writeFile, readFile, chmod } = await import("node:fs/promises");
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    try {
+      await runSetup({
+        env: process.env as Record<string, string | undefined>,
+        home: homedir(),
+        stdout: (line) => console.log(line),
+        // EOF / closed stdin (piped, CI) → "" = accept the default for the rest.
+        prompt: async (q) => {
+          try {
+            return await rl.question(q);
+          } catch {
+            return "";
+          }
+        },
+        fetchImpl: fetch,
+        readFile: (p) => readFile(p, "utf8"),
+        writeFile: async (p, data, mode) => {
+          await writeFile(p, data, { mode });
+          await chmod(p, mode); // mode in writeFile only applies on create
+        },
+        mkdir: async (p) => {
+          await mkdir(p, { recursive: true });
+        },
+        runCommand: (cmd, args) =>
+          new Promise((resolve) => {
+            const child = spawn(cmd, args, { stdio: "inherit" });
+            child.on("close", (code) => resolve(code ?? 1));
+            child.on("error", () => resolve(1));
+          }),
+        randomToken: () => randomBytes(32).toString("hex"),
+        installService: (envFile) => serviceInstall(makeServiceDeps(), { envFile }),
+        doctor: async () => {
+          await runDoctor({
+            env: process.env as Record<string, string | undefined>,
+            fetchImpl: fetch,
+            stdout: (line) => console.log(line),
+            nodeVersion: process.version,
+            loadSkills: () => loadSkills(),
+          });
+        },
+      });
+    } finally {
+      rl.close();
+    }
+    return;
+  }
 
   // -------------------------------------------------------------------------
   // Interactive chat (default with no args) — full REPL with /commands

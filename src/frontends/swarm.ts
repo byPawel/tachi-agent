@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /** tachi-agent swarm: fan out role agents on one task → synthesized answer. */
 import { buildSwarmFromEnv } from "../swarm/swarm.js";
+import { loadUserEnv } from "../env-bootstrap.js";
 
 async function main(): Promise<void> {
+  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   const task = process.argv.slice(2).join(" ").trim();
   if (!task) {
     console.error('usage: tachi-agent-swarm "<task>"');
