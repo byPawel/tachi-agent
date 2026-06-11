@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { runAgentHandler } from "../mcp-server.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { runAgentHandler, resolveRunTimeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from "../mcp-server.js";
 import type { RunResult } from "../../types.js";
 
 /** Fake runtime whose orchestrator returns a scripted RunResult (or throws). */
@@ -47,5 +47,43 @@ describe("run_agent MCP handler", () => {
     const res = await runAgentHandler(fakeRuntime(new Error("Ollama unreachable")), { task: "x" });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain("Ollama unreachable");
+  });
+
+  it("per-call timeoutMs overrides the default and reaches the orchestrator", async () => {
+    let seen: any;
+    await runAgentHandler(fakeRuntime(ok, (o) => (seen = o)), { task: "x", timeoutMs: 300_000 });
+    expect(seen.timeoutMs).toBe(300_000);
+  });
+
+  it("falls back to defaults.timeoutMs when no per-call timeoutMs is given", async () => {
+    let seen: any;
+    await runAgentHandler(fakeRuntime(ok, (o) => (seen = o)), { task: "x" }, { maxIterations: 8, timeoutMs: 240_000 });
+    expect(seen.timeoutMs).toBe(240_000);
+  });
+});
+
+describe("resolveRunTimeoutMs", () => {
+  afterEach(() => { delete process.env.TACHI_RUN_TIMEOUT_MS; });
+
+  it("returns the built-in default when the env var is unset", () => {
+    delete process.env.TACHI_RUN_TIMEOUT_MS;
+    expect(resolveRunTimeoutMs()).toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  it("returns the env value when it is a positive number", () => {
+    process.env.TACHI_RUN_TIMEOUT_MS = "600000";
+    expect(resolveRunTimeoutMs()).toBe(600_000);
+  });
+
+  it("fails soft to the default on garbage or non-positive values", () => {
+    process.env.TACHI_RUN_TIMEOUT_MS = "banana";
+    expect(resolveRunTimeoutMs()).toBe(DEFAULT_TIMEOUT_MS);
+    process.env.TACHI_RUN_TIMEOUT_MS = "-5";
+    expect(resolveRunTimeoutMs()).toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  it("clamps absurd values to MAX_TIMEOUT_MS", () => {
+    process.env.TACHI_RUN_TIMEOUT_MS = "999999999999";
+    expect(resolveRunTimeoutMs()).toBe(MAX_TIMEOUT_MS);
   });
 });

@@ -445,6 +445,7 @@ All configuration is via environment variables (e.g. in `.env`, loaded with `nod
 | `TACHI_FORCE_SEARCH` | off | `1/true/yes/on` → force a grounding search before reasoning on EVERY task. |
 | `TACHI_MAX_EMPTY_TURNS` | `2` | Consecutive blank model turns nudged through before halting as `empty-response`. |
 | `TACHI_CALL_TIMEOUT_MS` | `120000` | Per-MCP-tool-call timeout. |
+| `TACHI_RUN_TIMEOUT_MS` | `90000` | Whole-run wall-clock cap for the `run_agent` MCP server (max `3600000`); callers can also pass `timeoutMs` per call. The MCP client's own call timeout must be ≥ this (Claude Code: `MCP_TOOL_TIMEOUT`). |
 | `TACHI_MAX_TOOL_RESULT_CHARS` | `30000` | Truncate tool results before they reach the model context (`0` disables). |
 | `TACHI_CONTEXT_INSPECT` | off | `1` → emit per-turn context JSONL to `.tachi/context-inspect/`. |
 
