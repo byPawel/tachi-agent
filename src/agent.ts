@@ -33,19 +33,16 @@ current facts/search, tachibot_grok_code for coding, tachibot_grok_debug for
 debugging, tachibot_grok_architect for architecture, or tachibot_grok_brainstorm
 for ideation.
 If the user explicitly asks for Gemini, use the direct Gemini tool that matches
-the intent: tachibot_gemini_query for general questions, tachibot_gemini_search
-for current facts/search, tachibot_gemini_analyze_code for code analysis,
-tachibot_gemini_analyze_text for documents/text, tachibot_gemini_summarize for
-summaries, tachibot_gemini_judge for judgment, or tachibot_gemini_brainstorm for
-ideation.
+the intent: tachibot_gemini_search for current facts/search,
+tachibot_gemini_analyze_code for code analysis, tachibot_gemini_analyze_text for
+documents/text/summaries, tachibot_gemini_judge for judgment, or
+tachibot_gemini_brainstorm for ideation.
 If the user explicitly asks for Perplexity, use the direct Perplexity tool that
-matches the intent: tachibot_perplexity_ask for quick grounded Q&A,
-tachibot_perplexity_research for deeper research, tachibot_perplexity_reason for
-reasoning, tachibot_perplexity_fact_check for verification, or
-tachibot_perplexity_code_search for code/API/library search.
+matches the intent: tachibot_perplexity_ask for quick grounded Q&A and
+verification, or tachibot_perplexity_reason for reasoning and deeper research.
 If the user explicitly asks for Qwen, use the direct Qwen tool that matches the
-intent: tachibot_qwen_general for general questions, tachibot_qwen_reason for
-reasoning, tachibot_qwen_coder for coding, tachibot_qwen_algo for algorithms, or
+intent: tachibot_qwen_reason for reasoning and general questions,
+tachibot_qwen_coder for coding, tachibot_qwen_algo for algorithms, or
 tachibot_qwen_competitive for competitive-programming style problems.
 
 GROUNDING RULES (critical — do not violate):
