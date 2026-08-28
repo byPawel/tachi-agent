@@ -5,7 +5,9 @@ import type { AgentRuntime } from "../runtime.js";
 import {
   runCodingAgent,
   resolveCodingCwd,
+  writeAuthorized,
   type CodingAgentResult,
+  type CodingAgentProgress,
   type RunCodingAgentArgs,
 } from "./runner.js";
 import {
@@ -13,14 +15,23 @@ import {
   finishCodingCoordination,
   type CodingCoordinationContext,
 } from "./coordination.js";
+import { createSemaphore, resolveCodingConcurrency } from "./concurrency.js";
 
-export interface RunCodingAgentToolArgs extends Omit<RunCodingAgentArgs, "signal"> {
+/** Bounded in-flight coding workers — every call spawns a real OS process. */
+const codingSlots = createSemaphore(resolveCodingConcurrency());
+
+export interface RunCodingAgentToolArgs extends Omit<RunCodingAgentArgs, "signal" | "onProgress"> {
   /** Exact files from the implementation plan; Dokoro leases them before launch. */
   plannedFiles?: string[];
   /** Persist a directed Dokoro handoff in addition to returning the MCP result. Default true. */
   reportToDokoro?: boolean;
   /** Dokoro handoff recipient. Default `claude-code`. */
   targetAgent?: string;
+}
+
+export interface CodingAgentHandlerContext {
+  signal?: AbortSignal;
+  onProgress?: (update: CodingAgentProgress) => void | Promise<void>;
 }
 
 interface TextResult {
@@ -35,13 +46,29 @@ export async function runCodingAgentHandler(
   runtime: Pick<AgentRuntime, "host" | "memory">,
   args: RunCodingAgentToolArgs,
   runner: CodingAgentRunner = runCodingAgent,
+  context: CodingAgentHandlerContext = {},
 ): Promise<TextResult> {
+  // Write mode is opt-in: refuse it up front unless explicitly granted, so an
+  // untrusted-content-driven write cannot proceed just because the tool allows it.
+  if (!writeAuthorized({ mode: args.mode, env: process.env })) {
+    return {
+      content: [{
+        type: "text",
+        text: "tachi coding-agent error: write mode is disabled. " +
+          "Set TACHI_CODING_ALLOW_WRITE=1 to enable it, or call with mode:\"review\".",
+      }],
+      isError: true,
+    };
+  }
+
   const reportToDokoro = args.reportToDokoro !== false;
-  const agentId = `tachi-${args.agent}-${randomUUID().slice(0, 8)}`;
+  const agentId = `tachi-${args.agent}-${randomUUID()}`;
   const sessionId = `coding-${new Date().toISOString()}-${agentId}`;
   let coordination: CodingCoordinationContext | undefined;
   let claimed = false;
+  let leaseWarning = "";
 
+  const releaseSlot = await codingSlots.acquire(context.signal);
   try {
     const cwd = await resolveCodingCwd(args.cwd);
     coordination = {
@@ -52,10 +79,14 @@ export async function runCodingAgentHandler(
       ...(args.plannedFiles?.length ? { files: args.plannedFiles } : {}),
     };
     if (reportToDokoro || coordination.files?.length) {
-      claimed = (await beginCodingCoordination(runtime.host, coordination)).claimed;
+      const coord = await beginCodingCoordination(runtime.host, { ...coordination, timeoutMs: args.timeoutMs });
+      claimed = coord.claimed;
+      if (coordination.files?.length && !coord.claimed) {
+        leaseWarning = " · ⚠ leases unconfirmed (dokoro absent or lease not granted)";
+      }
     }
 
-    const result = await runner({ ...args, cwd });
+    const result = await runner({ ...args, cwd, signal: context.signal, onProgress: context.onProgress });
     const identity = [result.agent, result.provider, result.model].filter(Boolean).join("/");
     const summary = [
       `${identity} completed a ${result.mode} coding task in ${result.cwd}.`,
@@ -78,8 +109,21 @@ export async function runCodingAgentHandler(
       `workspace: ${result.isolated ? "isolated worktree" : result.cwd}`,
       result.sessionId ? `session: ${result.sessionId}` : "",
       reportToDokoro ? `handoff: Dokoro → ${args.targetAgent ?? "claude-code"}` : "",
-    ].filter(Boolean).join(" · ");
-    return { content: [{ type: "text", text: `[${header}]\n\n${result.answer}` }] };
+    ].filter(Boolean).join(" · ") + leaseWarning;
+    const trace = result.trace?.length
+      ? [
+        "### Agent trace",
+        ...result.trace.map((entry) => `- **${entry.kind}:** ${entry.message}`),
+        "",
+        "### Final answer",
+      ].join("\n")
+      : "";
+    return {
+      content: [{
+        type: "text",
+        text: [`[${header}]`, trace, result.answer].filter(Boolean).join("\n\n"),
+      }],
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (coordination && (reportToDokoro || claimed)) {
@@ -91,6 +135,8 @@ export async function runCodingAgentHandler(
       }, claimed);
     }
     return { content: [{ type: "text", text: `tachi coding-agent error: ${message}` }], isError: true };
+  } finally {
+    releaseSlot();
   }
 }
 
@@ -114,14 +160,36 @@ export function registerCodingAgentTool(server: McpServer, runtime: AgentRuntime
         isolate: z.boolean().optional().describe("Hermes/OpenRouter: use an isolated worktree (default true; forced in review mode)"),
         maxTurns: z.number().int().positive().max(500).optional(),
         timeoutMs: z.number().int().min(1_000).max(3_600_000).optional(),
+        visibility: z.enum(["final", "trace", "live"]).optional().default("trace")
+          .describe("final: answer only; trace: include public execution trace; live: trace plus MCP progress notifications"),
         plannedFiles: z.array(z.string()).max(50).optional()
           .describe("Exact plan files to lease through Dokoro before launching the worker"),
         reportToDokoro: z.boolean().optional().default(true),
         targetAgent: z.string().optional().default("claude-code"),
       },
     },
-    async (args) => {
-      const result = await runCodingAgentHandler(runtime, args as RunCodingAgentToolArgs);
+    async (args, extra) => {
+      let progress = 0;
+      const progressToken = extra._meta?.progressToken;
+      const onProgress = progressToken === undefined
+        ? undefined
+        : async (update: CodingAgentProgress) => {
+          progress += 1;
+          await extra.sendNotification({
+            method: "notifications/progress",
+            params: {
+              progressToken,
+              progress,
+              message: `[${update.kind}] ${update.message}`,
+            },
+          });
+        };
+      const result = await runCodingAgentHandler(
+        runtime,
+        args as RunCodingAgentToolArgs,
+        runCodingAgent,
+        { signal: extra.signal, onProgress },
+      );
       return result as typeof result & { [key: string]: unknown };
     },
   );
