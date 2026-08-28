@@ -438,12 +438,16 @@ export async function runCodingAgent(
   const pf = await preflightCodingAgent(args.agent, command, {
     env: process.env,
     hasBinary: async (cmd) => {
-      // Resolve via the same PATH the child would use; `which`-free to stay portable.
+      // Resolve via the same PATH the child would use, shell-free. On POSIX
+      // `command -v` is a shell builtin, so we invoke sh but pass cmd as the
+      // positional $1 — never interpolated, so there is no injection surface.
       const { execFile } = await import("node:child_process");
       return await new Promise<boolean>((resolve) => {
-        const probe = process.platform === "win32" ? "where" : "command";
-        const probeArgs = process.platform === "win32" ? [cmd] : ["-v", cmd];
-        execFile(probe, probeArgs, { shell: process.platform !== "win32" }, (err) => resolve(!err));
+        if (process.platform === "win32") {
+          execFile("where", [cmd], (err) => resolve(!err));
+        } else {
+          execFile("/bin/sh", ["-c", 'command -v -- "$1" >/dev/null 2>&1', "sh", cmd], (err) => resolve(!err));
+        }
       });
     },
     fileExists: async (p) => { try { await access(p); return true; } catch { return false; } },

@@ -212,9 +212,13 @@ export async function checkCodingAgents(deps: DoctorDeps): Promise<CheckResult[]
   const pfDeps = (env: Record<string, string | undefined>): PreflightDeps => ({
     env: env as NodeJS.ProcessEnv,
     hasBinary: async (cmd) => new Promise<boolean>((resolve) => {
-      const probe = process.platform === "win32" ? "where" : "command";
-      const probeArgs = process.platform === "win32" ? [cmd] : ["-v", cmd];
-      execFile(probe, probeArgs, { shell: process.platform !== "win32" }, (err) => resolve(!err));
+      // Shell-free: on POSIX `command -v` is a builtin, so invoke sh but pass
+      // cmd as the positional $1 (never interpolated → no injection surface).
+      if (process.platform === "win32") {
+        execFile("where", [cmd], (err) => resolve(!err));
+      } else {
+        execFile("/bin/sh", ["-c", 'command -v -- "$1" >/dev/null 2>&1', "sh", cmd], (err) => resolve(!err));
+      }
     }),
     fileExists: async (p) => { try { await access(p); return true; } catch { return false; } },
   });
