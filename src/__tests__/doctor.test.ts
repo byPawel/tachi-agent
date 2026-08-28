@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 
-import { runDoctor, type DoctorDeps, type CheckResult } from "../doctor.js";
+import { runDoctor, checkCodingAgents, type DoctorDeps, type CheckResult } from "../doctor.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -324,6 +324,28 @@ describe("doctor: daemon check", () => {
 });
 
 // ---------------------------------------------------------------------------
+// coding agents
+// ---------------------------------------------------------------------------
+describe("doctor: coding agent checks", () => {
+  it("reports codex OK when key present and binary resolvable", async () => {
+    const results = await checkCodingAgents(
+      makeDeps({ env: { CODEX_API_KEY: "sk", TACHI_CODING_AGENTS: "codex" } }),
+    );
+    const codex = results.find((r) => r.name.includes("codex"));
+    expect(codex?.ok).toBe(true);
+  });
+
+  it("reports codex broken when configured but no cred", async () => {
+    const results = await checkCodingAgents(
+      makeDeps({ env: { TACHI_CODING_AGENTS: "codex" } }),
+    );
+    const codex = results.find((r) => r.name.includes("codex"));
+    expect(codex?.ok).toBe(false);
+    expect(codex?.critical).toBe(false); // informational, never blocks the CLI
+  });
+});
+
+// ---------------------------------------------------------------------------
 // output format + footer + exit semantics
 // ---------------------------------------------------------------------------
 describe("doctor: output and footer", () => {
@@ -335,9 +357,9 @@ describe("doctor: output and footer", () => {
     const { results, ok } = await runDoctor(deps);
     // one line per check + footer
     expect(deps.lines).toHaveLength(results.length + 1);
-    expect(deps.lines[0]).toBe("✓ node      v22.1.0");
+    expect(deps.lines[0]).toBe("✓ node               v22.1.0");
     const daemonLine = deps.lines.find((l) => l.includes("daemon"));
-    expect(daemonLine).toBe("– daemon    local mode (no TACHI_DAEMON_URL)");
+    expect(daemonLine).toBe("– daemon             local mode (no TACHI_DAEMON_URL)");
     expect(deps.lines.at(-1)).toBe("doctor: all good");
     expect(ok).toBe(true);
   });

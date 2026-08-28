@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runCodingAgentHandler } from "../mcp.js";
+import type { CodingAgentResult } from "../runner.js";
 
 describe("run_coding_agent MCP handler", () => {
   const coordinationTools = [
@@ -14,23 +15,26 @@ describe("run_coding_agent MCP handler", () => {
       host: { internalTools: () => coordinationTools, callInternal },
       memory: { log },
     } as any;
-    const runner = vi.fn(async () => ({
+    const runner = vi.fn(async (): Promise<CodingAgentResult> => ({
       agent: "codex",
       mode: "review",
       cwd: process.cwd(),
       isolated: false,
       answer: "No issues found",
+      trace: [{ kind: "reasoning", message: "Checked the public API." }],
       stdout: "",
       stderr: "",
       exitCode: 0,
       signal: null,
       timedOut: false,
       aborted: false,
-    } as const));
+    }));
 
     const out = await runCodingAgentHandler(runtime, { agent: "codex", task: "review", cwd: process.cwd() }, runner);
     expect(out.isError).toBeFalsy();
     expect(out.content[0].text).toContain("No issues found");
+    expect(out.content[0].text).toContain("### Agent trace");
+    expect(out.content[0].text).toContain("Checked the public API.");
     expect(out.content[0].text).toContain("handoff: Dokoro");
     expect(log).toHaveBeenCalledOnce();
     expect(callInternal).toHaveBeenCalledWith(
@@ -38,5 +42,88 @@ describe("run_coding_agent MCP handler", () => {
       expect.objectContaining({ to_agent: "claude-code" }),
       undefined,
     );
+  });
+
+  it("forwards live progress and cancellation to the coding runner", async () => {
+    const onProgress = vi.fn(async () => undefined);
+    const controller = new AbortController();
+    const runtime = {
+      host: { internalTools: () => [], callInternal: vi.fn() },
+      memory: undefined,
+    } as any;
+    const runner = vi.fn(async (args) => {
+      await args.onProgress?.({ kind: "status", message: "working" });
+      return {
+        agent: "openrouter",
+        provider: "openrouter",
+        model: "qwen/qwen3-coder",
+        mode: "review",
+        cwd: process.cwd(),
+        isolated: true,
+        answer: "done",
+        stdout: "done",
+        stderr: "",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+      } as const;
+    });
+
+    await runCodingAgentHandler(
+      runtime,
+      { agent: "openrouter", model: "qwen/qwen3-coder", task: "review", reportToDokoro: false },
+      runner,
+      { signal: controller.signal, onProgress },
+    );
+
+    expect(runner).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal, onProgress }));
+    expect(onProgress).toHaveBeenCalledWith({ kind: "status", message: "working" });
+  });
+
+  const writeResult = async (): Promise<CodingAgentResult> => ({
+    agent: "codex",
+    mode: "write",
+    cwd: process.cwd(),
+    isolated: false,
+    answer: "done",
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    aborted: false,
+  });
+  const bareRuntime = () => ({ host: { internalTools: () => [], callInternal: vi.fn(async () => "") }, memory: undefined } as any);
+
+  it("rejects write mode unless TACHI_CODING_ALLOW_WRITE is set", async () => {
+    delete process.env.TACHI_CODING_ALLOW_WRITE;
+    const out = await runCodingAgentHandler(bareRuntime(), { agent: "codex", task: "t", mode: "write" }, writeResult);
+    expect(out.isError).toBe(true);
+    expect(out.content[0].text).toMatch(/TACHI_CODING_ALLOW_WRITE/);
+  });
+
+  it("allows write mode when the env grant is present", async () => {
+    process.env.TACHI_CODING_ALLOW_WRITE = "1";
+    try {
+      const out = await runCodingAgentHandler(
+        bareRuntime(),
+        { agent: "codex", task: "t", mode: "write", reportToDokoro: false },
+        writeResult,
+      );
+      expect(out.isError).toBeFalsy();
+    } finally {
+      delete process.env.TACHI_CODING_ALLOW_WRITE;
+    }
+  });
+
+  it("flags unconfirmed leases when plannedFiles were requested but not claimed", async () => {
+    const reviewResult = async (): Promise<CodingAgentResult> => ({ ...(await writeResult()), mode: "review" });
+    const out = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "codex", task: "t", mode: "review", plannedFiles: ["a.ts"], reportToDokoro: false },
+      reviewResult,
+    );
+    expect(out.content[0].text).toMatch(/leases unconfirmed/i);
   });
 });

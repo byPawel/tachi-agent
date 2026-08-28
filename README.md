@@ -78,7 +78,7 @@ same hub without modifying it:
 - **L2.5 — daemon** ✅ Long-running daemon (reuses the gateway) with thin-client **attach** and **session handoff** — durable monotonic event sequence, `Last-Event-ID` buffered replay, refcount-aware TTL/GC, and graceful drain. A `UnifiedClient` makes local and daemon execution interchangeable, so every front-end swaps a single constructor with no behavior change.
 - **L3 — swarm** ✅ Fan out N role-specialized agents (varied prompts/drivers) in parallel on one task, then synthesize via a dedicated synthesizer agent (which can call `tachibot_council` / `tachibot_jury`). Bounded concurrency, quorum warnings, and per-member isolated dokoro sessions. See [Swarm](#swarm).
 - **L4 — standalone** ✅ Persistent task queue + worker, recurring schedules, per-task multi-heart drivers (`TACHI_DRIVER` with `ollama`/`hermes`/`openai`/`openrouter`), proactive Telegram/Slack notifications, durable per-run event logs, and CLI visibility subcommands. See [Standalone mode](#standalone-mode--unattended-operation).
-- **L5 — hermes-parity chat** ✅ Interactive chat by default (bare `tachi-agent` opens the REPL), unified `/commands` surface shared across REPL and Telegram, `--driver`/`--skill` flags, skill bundles (`.tachi/skills/*.md`), and `tachi-agent service install` for macOS launchd autostart.
+- **L5 — hermes-parity chat** ✅ Interactive chat by default (bare `tachi-agent` opens the REPL), unified `/commands` surface shared across REPL and Telegram, `--driver`/`--skill` flags, skill bundles (`.tachi/skills/*.md`), and `tachi-agent service install` for macOS launchd autostart. Multi-turn **conversation continuity**: REPL and Telegram sessions replay their recent user/assistant turns into each run (capped; `/reset` clears), locally and through the daemon (`POST /runs` `history`). The `run_agent` MCP tool accepts `driver` / `skill` / `systemPrompt`, so Claude Code can drive tachi-agent as a configurable sub-agent.
 
 ## Develop
 
@@ -135,6 +135,124 @@ The first command exercises all three layers: dokoro recalls prior context (memo
 
 Ctrl-C stops the run cleanly (`AbortSignal` → halts with `aborted`). Progress streams to **stderr**; the final answer prints to **stdout**.
 
+## Claude Code coding workers
+
+The `tachi-agent-mcp` frontend lets a Claude Code session delegate bounded coding tasks to external CLI agents while keeping Claude as the coordinator:
+
+```text
+Claude Code (coordinator / Fable bridge)
+        │ run_coding_agent
+        ▼
+    tachi-agent MCP
+        ├── Codex CLI
+        ├── Grok CLI
+        ├── Hermes Agent
+        └── Hermes Agent + OpenRouter model
+                 │
+                 └── result + public trace + optional Dokoro handoff
+```
+
+Build the MCP frontend, then register it in the target repository's `.mcp.json`:
+
+```bash
+npm install
+npm run build
+```
+
+```json
+{
+  "mcpServers": {
+    "tachi-agent": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/tachi-agent/dist/frontends/mcp-server.js"],
+      "env": {
+        "TACHI_CODING_ROOTS": "/absolute/path/to/allowed/repository",
+        "TACHI_OPENROUTER_CODING_MODEL": "qwen/qwen3-coder"
+      }
+    }
+  }
+}
+```
+
+`TACHI_CODING_ROOTS` is a comma-separated allowlist. Requested working directories are resolved through real paths and rejected when they escape those roots.
+
+### Security posture and environment gates
+
+Workers run as real local processes, so the tool is hardened to keep an injected task (or untrusted repository content) from escalating:
+
+- **Review is the default and is safe.** Review mode is read-only for Codex/Grok and worktree-isolated for Hermes/OpenRouter; the auto-approve flags (`--always-approve`, `--yolo`) are emitted **only** in write mode.
+- **Write mode is opt-in.** `run_coding_agent` refuses `mode: "write"` unless `TACHI_CODING_ALLOW_WRITE=1` (or `true`) is set in the server environment.
+- **Minimal worker environment.** The full `process.env` is **not** inherited. Each worker gets only OS basics (PATH/HOME-class) plus the specific credential its own agent needs (e.g. Codex sees `CODEX_API_KEY`/`OPENAI_API_KEY`, not your gateway tokens or unrelated cloud keys). Add extra passthrough variables with `TACHI_WORKER_ENV_ALLOW` (comma-separated).
+- **Auth preflight.** Before spawning, the binary and a usable credential are verified; a missing key returns an actionable error immediately instead of hanging until the run timeout. `tachi-agent doctor` reports the same readiness per agent (scope it with `TACHI_CODING_AGENTS`).
+- **Bounded concurrency.** In-flight workers are capped (`TACHI_CODING_MAX_CONCURRENCY`, default 3).
+- **Advisory leases, surfaced not silent.** Dokoro file leases are advisory; when `plannedFiles` are requested but the lease is not granted (or Dokoro is absent), the result header carries a `⚠ leases unconfirmed` note rather than implying exclusivity. A lease outlives its worker (TTL = run timeout + margin).
+
+| Env var | Effect |
+|---|---|
+| `TACHI_CODING_ROOTS` | Comma-separated realpath allowlist for `cwd` (default: MCP server cwd) |
+| `TACHI_CODING_ALLOW_WRITE` | `1`/`true` to permit `mode: "write"` (default: write disabled) |
+| `TACHI_CODING_MAX_CONCURRENCY` | Max concurrent workers, clamped 1–16 (default 3) |
+| `TACHI_WORKER_ENV_ALLOW` | Extra env var names to pass through to workers |
+| `TACHI_CODING_AGENTS` | Comma-separated agents for `doctor` to probe (default: all four) |
+
+The MCP server exposes `run_coding_agent`:
+
+| Input | Purpose |
+|---|---|
+| `agent` | `codex`, `grok`, `hermes`, or `openrouter` |
+| `task` | Complete worker prompt, including acceptance criteria |
+| `cwd` | Repository under `TACHI_CODING_ROOTS` |
+| `mode` | `review` for read-only/isolated analysis; `write` for explicit implementation |
+| `model` | Optional model override. OpenRouter falls back to `TACHI_OPENROUTER_CODING_MODEL`, then `OPENROUTER_MODEL` |
+| `visibility` | `final`, `trace` (default), or `live` |
+| `plannedFiles` | Exact files to lease through Dokoro before edits |
+| `reportToDokoro` | Persist a directed handoff; defaults to `true` |
+| `targetAgent` | Handoff recipient; defaults to `claude-code` |
+
+### Visibility and streaming
+
+- `final` returns only the final worker answer.
+- `trace` also returns a compact public execution trace after completion.
+- `live` sends MCP `notifications/progress` while the worker runs and still returns the completed trace when one is available.
+
+Codex uses `codex exec --json`, so its public JSONL events can report reasoning summaries, commands, file changes, plans, tool calls, and lifecycle state. Raw private chain-of-thought is never exposed. Hermes/OpenRouter currently stream lifecycle status through MCP and return their final answer; richer structured Hermes events can be added when its quiet CLI mode exposes a stable event format.
+
+### OpenRouter coding agents
+
+The `openrouter` worker is the full Hermes Agent coding harness with an OpenRouter model selected per run. It keeps Hermes file, terminal, and skill toolsets, checkpoints destructive file operations, tags the session as a tool integration, and uses a git worktree by default. Review mode always stays isolated; pass `isolate: false` only for an explicitly authorized write task that must modify the requested checkout.
+
+Prerequisites:
+
+```bash
+export OPENROUTER_API_KEY="..."
+export TACHI_OPENROUTER_CODING_MODEL="qwen/qwen3-coder"
+export HERMES_CLI="/absolute/path/to/hermes"   # optional when hermes is on PATH
+```
+
+Example tool arguments:
+
+```json
+{
+  "agent": "openrouter",
+  "model": "qwen/qwen3-coder",
+  "task": "Implement the bounded change, run focused tests, and report modified files.",
+  "cwd": "/absolute/path/to/repository",
+  "mode": "write",
+  "isolate": false,
+  "visibility": "live",
+  "plannedFiles": ["src/example.ts", "src/example.test.ts"],
+  "reportToDokoro": true,
+  "targetAgent": "claude-code"
+}
+```
+
+For a reusable Claude Code bridge, create a project subagent in `.claude/agents/`, set `model: fable`, scope `mcpServers` to `tachi-agent`, and allow only `mcp__tachi-agent__run_coding_agent`. The bridge should forward the full task once and return the external worker result without implementing the task itself.
+
+### Parallelism and coordination
+
+Every concurrent call starts a separate CLI process. In-flight workers are capped by `TACHI_CODING_MAX_CONCURRENCY` (default 3, clamped 1–16); calls beyond the cap queue for a slot. Beyond that, practical limits come from provider rate limits, machine resources, token cost, and file ownership. Give each worker disjoint files or an isolated worktree, and use `plannedFiles` so Dokoro can detect conflicting leases before edits begin (an unclaimed lease is surfaced as `⚠ leases unconfirmed`, never silently assumed).
+
 ### Install the `tachi-agent` command
 
 ```bash
@@ -163,6 +281,8 @@ tachi-agent --skill researcher         # opens: tachi [researcher] ›
 
 The prompt shows the active session: `tachi [driver·skill] ›`. History persists at `~/.tachi-agent/repl_history` (capped at 1000 lines). Rewritten tasks (from `/jury`, `/search`, `/think`) are echoed as `→ task` before running.
 
+**Conversation continuity:** chat sessions are multi-turn — each REPL turn (and each Telegram chat) carries the prior user/assistant exchanges into the next run, so follow-up questions keep their referent ("what else did *he* create?"). The window is capped (40 entries per session, re-capped by the orchestrator at 20 turns / 24k chars, most recent kept) and cleared by `/reset`. This is short-term session memory; dokoro remains the long-term memory across sessions.
+
 ### Commands (unified across REPL and Telegram)
 
 | Command | What it does |
@@ -173,7 +293,7 @@ The prompt shows the active session: `tachi [driver·skill] ›`. History persis
 | `/status` | Show session state (driver, skill, mode) |
 | `/driver <name>\|off` | Set or clear the session driver |
 | `/skill <name>\|off` | Activate or clear a skill bundle |
-| `/reset` | Clear the full session (driver + skill) |
+| `/reset` | Clear the full session (driver + skill + conversation history) |
 | `/jury <question>` | Run a cross-model jury verdict via `tachibot_jury` |
 | `/search <query>` | Search with `tachibot_grok_search` or Perplexity |
 | `/think <question>` | Reason step by step over a question |
@@ -302,7 +422,7 @@ npm run build && node dist/frontends/gateway.js
 
 | Method & path | Purpose |
 |---|---|
-| `POST /runs` `{task, maxIterations?, driver?, systemPrompt?, allowTools?}` | start a run → `202 {run_id}` |
+| `POST /runs` `{task, maxIterations?, driver?, systemPrompt?, allowTools?, history?}` | start a run → `202 {run_id}` (`history` = up to 40 `{role: "user"\|"assistant", content}` turns, ≤ 32 KiB — chat continuity) |
 | `GET /runs/:id` | run state + final result |
 | `GET /runs/:id/events` | **SSE** stream: `step` / `assistant` / `tool-result` / `final` / `error` / `heartbeat` |
 | `DELETE /runs/:id` | cancel (cooperative abort) |

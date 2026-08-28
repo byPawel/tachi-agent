@@ -1,0 +1,49 @@
+// src/coding-agents/preflight.test.ts
+import { describe, it, expect } from "vitest";
+import { preflightCodingAgent, type PreflightDeps } from "./preflight.js";
+
+function deps(over: Partial<PreflightDeps> = {}): PreflightDeps {
+  return {
+    env: {},
+    hasBinary: async () => true,
+    fileExists: async () => false,
+    home: "/home/dev",
+    ...over,
+  };
+}
+
+describe("preflightCodingAgent", () => {
+  it("fails closed when the CLI binary is missing", async () => {
+    const r = await preflightCodingAgent("codex", "codex", deps({ hasBinary: async () => false }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/not found on PATH/i);
+  });
+
+  it("codex passes with CODEX_API_KEY", async () => {
+    const r = await preflightCodingAgent("codex", "codex", deps({ env: { CODEX_API_KEY: "sk" } }));
+    expect(r.ok).toBe(true);
+  });
+
+  it("codex passes with a saved auth.json even without a key", async () => {
+    const r = await preflightCodingAgent("codex", "codex", deps({
+      fileExists: async (p) => p.endsWith(".codex/auth.json"),
+    }));
+    expect(r.ok).toBe(true);
+  });
+
+  it("codex fails closed with neither key nor auth.json, and names the fix", async () => {
+    const r = await preflightCodingAgent("codex", "codex", deps());
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/CODEX_API_KEY|OPENAI_API_KEY|codex login/i);
+  });
+
+  it("grok requires XAI_API_KEY or a session token file", async () => {
+    expect((await preflightCodingAgent("grok", "grok", deps())).ok).toBe(false);
+    expect((await preflightCodingAgent("grok", "grok", deps({ env: { XAI_API_KEY: "xai" } }))).ok).toBe(true);
+  });
+
+  it("openrouter requires OPENROUTER_API_KEY", async () => {
+    expect((await preflightCodingAgent("openrouter", "hermes", deps())).ok).toBe(false);
+    expect((await preflightCodingAgent("openrouter", "hermes", deps({ env: { OPENROUTER_API_KEY: "or" } }))).ok).toBe(true);
+  });
+});

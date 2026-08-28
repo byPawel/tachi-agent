@@ -4,9 +4,14 @@
  * fails. Pure: all IO via injected deps so every check is unit-testable.
  *
  * Checks: node version, Ollama reachability + model presence, TACHI_DRIVER
- * resolution, tachibot/dokoro MCP wiring, skills directory, daemon gateway.
+ * resolution, tachibot/dokoro MCP wiring, skills directory, daemon gateway,
+ * coding-agent worker CLIs (informational).
  */
+import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
+
 import "./drivers/register.js"; // side-effect: registers the built-in drivers
+import { preflightCodingAgent, type PreflightDeps } from "./coding-agents/preflight.js";
 import { getDriver } from "./registry.js";
 
 export interface DoctorDeps {
@@ -188,6 +193,50 @@ async function checkDaemon(deps: DoctorDeps): Promise<CheckResult> {
   };
 }
 
+const CODING_AGENTS = ["codex", "grok", "hermes", "openrouter"] as const;
+
+function agentCommand(agent: string, env: Record<string, string | undefined>): string {
+  const key = agent === "openrouter" ? "HERMES_CLI" : `${agent.toUpperCase()}_CLI`;
+  return env[key]?.trim() || (agent === "openrouter" ? "hermes" : agent);
+}
+
+/**
+ * One informational line per coding-agent worker CLI. Probes the agents in
+ * TACHI_CODING_AGENTS (comma list); with none set, probes all known agents
+ * with ok:null so an absent worker never reads as a failure. Never critical:
+ * a broken worker must not flip the doctor's exit code.
+ */
+export async function checkCodingAgents(deps: DoctorDeps): Promise<CheckResult[]> {
+  const configured = deps.env.TACHI_CODING_AGENTS?.split(",").map((s) => s.trim()).filter(Boolean);
+  const agents = configured?.length ? configured : [...CODING_AGENTS];
+  const pfDeps = (env: Record<string, string | undefined>): PreflightDeps => ({
+    env: env as NodeJS.ProcessEnv,
+    hasBinary: async (cmd) => new Promise<boolean>((resolve) => {
+      // Shell-free: on POSIX `command -v` is a builtin, so invoke sh but pass
+      // cmd as the positional $1 (never interpolated → no injection surface).
+      if (process.platform === "win32") {
+        execFile("where", [cmd], (err) => resolve(!err));
+      } else {
+        execFile("/bin/sh", ["-c", 'command -v -- "$1" >/dev/null 2>&1', "sh", cmd], (err) => resolve(!err));
+      }
+    }),
+    fileExists: async (p) => { try { await access(p); return true; } catch { return false; } },
+  });
+  const out: CheckResult[] = [];
+  for (const agent of agents) {
+    if (!CODING_AGENTS.includes(agent as typeof CODING_AGENTS[number])) continue;
+    const cmd = agentCommand(agent, deps.env);
+    const pf = await preflightCodingAgent(agent as typeof CODING_AGENTS[number], cmd, pfDeps(deps.env));
+    out.push({
+      name: `coding:${agent}`,
+      ok: pf.ok ? true : (configured ? false : null),
+      detail: pf.ok ? `ready (${cmd})` : (pf.reason ?? "not configured"),
+      critical: false,
+    });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // runDoctor
 // ---------------------------------------------------------------------------
@@ -214,6 +263,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<{ results: CheckResul
     ),
     await checkSkills(deps),
     await checkDaemon(deps),
+    ...(await checkCodingAgents(deps)),
   ];
 
   const nameWidth = Math.max(...results.map((r) => r.name.length)) + 2;
