@@ -118,6 +118,9 @@ async function main(): Promise<void> {
     },
   );
 
+  const { registerCodingAgentTool } = await import("../coding-agents/mcp.js");
+  registerCodingAgentTool(server, runtime);
+
   const shutdown = async () => {
     try { await runtime.close(); } finally { process.exit(0); }
   };
@@ -125,7 +128,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   await server.connect(new StdioServerTransport());
-  console.error(`tachi-agent MCP server ready · ${runtime.toolCount} downstream tools · exposes run_agent`);
+  console.error(`tachi-agent MCP server ready · ${runtime.toolCount} downstream tools · exposes run_agent + run_coding_agent`);
 }
 
 // Only run when executed directly (not when imported by tests).

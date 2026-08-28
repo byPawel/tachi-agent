@@ -90,6 +90,8 @@ export function isAllowed(name: string, allow?: string[]): boolean {
 export class McpToolHost implements ToolHost {
   private clients = new Map<string, Client>();
   private merged: AgentTool[] = [];
+  /** Complete downstream inventory. Kept separate from the model-visible allowlisted surface. */
+  private discovered: AgentTool[] = [];
 
   constructor(private readonly opts: McpToolHostOptions = {}) {}
 
@@ -110,12 +112,14 @@ export class McpToolHost implements ToolHost {
       const { tools } = await client.listTools();
       for (const t of tools) {
         const name = nsName(s.name, t.name);
-        if (!isAllowed(name, this.opts.allow)) continue;
-        this.merged.push({
+        const agentTool: AgentTool = {
           name,
           description: t.description ?? "",
           parameters: (t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
-        });
+        };
+        this.discovered.push(agentTool);
+        if (!isAllowed(name, this.opts.allow)) continue;
+        this.merged.push(agentTool);
       }
     }
   }
@@ -124,8 +128,34 @@ export class McpToolHost implements ToolHost {
     return this.merged;
   }
 
+  /**
+   * Internal controller inventory. These tools are NOT exposed to the reasoning
+   * model; fixed orchestration code uses them for presence, claims and handoffs.
+   */
+  internalTools(): AgentTool[] {
+    return this.discovered;
+  }
+
+  /**
+   * Dispatch a controller-owned coordination call without widening the model's
+   * allowlist. Callers MUST choose a fixed trusted tool name, never pass through
+   * a model/user-selected downstream name.
+   */
+  async callInternal(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+    return this.callImpl(name, args, signal, false);
+  }
+
   async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
-    if (!isAllowed(name, this.opts.allow)) throw new Error(`Tool "${name}" is not in the allowlist`);
+    return this.callImpl(name, args, signal, true);
+  }
+
+  private async callImpl(
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    enforceAllowlist: boolean,
+  ): Promise<string> {
+    if (enforceAllowlist && !isAllowed(name, this.opts.allow)) throw new Error(`Tool "${name}" is not in the allowlist`);
     const { server, tool } = parseNs(name);
     const client = this.clients.get(server);
     if (!client) throw new Error(`No MCP server "${server}" connected`);
