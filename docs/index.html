@@ -47,6 +47,10 @@
             <strong><a href="standalone.html">unattended daemon</a></strong> with a persistent queue,
             recurring schedules, and per-task hearts.
           </p>
+          <p class="hero-sub hero-anim d3">
+            One line installs the whole stack — agent, memory, council, wizard:<br />
+            <code>curl -fsSL https://bypawel.github.io/tachi-agent/install.sh | sh</code>
+          </p>
           <div class="cta-row hero-anim d5">
             <a class="btn btn-primary" href="get-started.html">Get started →</a>
             <a class="btn" href="architecture.html">Architecture</a>
@@ -155,7 +159,7 @@
             <span class="card-tag">interactive chat</span>
             <h3>REPL by default</h3>
             <p>
-              Run bare <code>tachi-agent</code> to open a persistent chat session. The prompt shows the active state: <code>tachi [driver·skill] ›</code>. History persists at <code>~/.tachi-agent/repl_history</code>. Pass <code>--driver</code> or <code>--skill</code> to start configured.
+              Run bare <code>tachi-agent</code> to open a persistent chat session. The prompt shows the active state: <code>tachi [driver·skill] ›</code>. Sessions are <strong>multi-turn</strong> — prior exchanges carry into each run, so follow-ups keep their referent; <code>/reset</code> starts fresh. History persists at <code>~/.tachi-agent/repl_history</code>. Pass <code>--driver</code> or <code>--skill</code> to start configured.
             </p>
           </article>
 
@@ -238,10 +242,20 @@ tachi-agent --skill researcher <span class="s">"explain the CAP theorem trade-of
             <p>A crash-safe persistent task queue with retry/backoff, recurring schedules from a hand-edited JSON file, per-task multi-heart drivers (<code>ollama</code> · <code>hermes</code> · <code>openai</code> · <code>openrouter</code>), outcome notifications to Telegram/Slack, durable per-run JSONL logs, and queue/run-log CLI commands.</p>
             <p><a href="standalone.html">Read the Standalone page →</a></p>
           </li>
-          <li class="new">
-            <span class="tl-tag">L5 — hermes-parity chat</span><span class="tl-state">✅ new in v0.4.0</span>
+          <li class="done">
+            <span class="tl-tag">L5 — hermes-parity chat</span><span class="tl-state">✅ shipped in v0.4.0</span>
             <h4>Interactive chat, skills, and service install</h4>
             <p>Bare <code>tachi-agent</code> opens an interactive REPL session. Unified <code>/commands</code> surface shared across REPL and Telegram (<code>/help</code>, <code>/tools</code>, <code>/model</code>, <code>/status</code>, <code>/driver</code>, <code>/skill</code>, <code>/reset</code>, <code>/jury</code>, <code>/search</code>, <code>/think</code>, <code>/task</code>, <code>/schedule</code>, <code>/exit</code>). Skill bundles (<code>.tachi/skills/*.md</code>) carry a system-prompt body, a tool allowlist, and a driver preset. <code>tachi-agent service install</code> bootstraps a macOS launchd <code>LaunchAgent</code> — the primary macOS daemon path. <code>tachi-agent doctor</code> runs preflight diagnostics.</p>
+          </li>
+          <li class="done">
+            <span class="tl-tag">L6 — one-line install</span><span class="tl-state">✅ new in v0.5.0</span>
+            <h4>One command, whole stack</h4>
+            <p><code>curl -fsSL https://bypawel.github.io/tachi-agent/install.sh | sh</code> installs Node ≥ 22 and Ollama if missing, then <code>tachi-agent</code> + <code>dokoro</code> + <code>tachibot-mcp</code> from npm, and hands off to the <strong><code>tachi-agent setup</code> wizard</strong>: pick a brain (local Ollama by default, or paste <em>one</em> OpenRouter key to power the agent <strong>and</strong> the whole tachibot council), wire the MCP servers, generate <code>GATEWAY_TOKEN</code>, optionally install the daemon service — then run <code>doctor</code>. Config lands in <code>~/.tachi/.env</code> (chmod 600), loaded as defaults by every bin; re-run the wizard anytime.</p>
+          </li>
+          <li class="new">
+            <span class="tl-tag">L7 — conversation memory</span><span class="tl-state">✅ new in v0.6.0</span>
+            <h4>A real multi-turn agent</h4>
+            <p>Chat sessions now <strong>remember</strong>: the REPL and each Telegram chat carry prior user/assistant turns into every run — locally <em>and</em> through the daemon (<code>POST /runs</code> accepts <code>history</code>) — so follow-up questions keep their referent. Windows are capped and marked as data, never instructions; <code>/reset</code> clears them. <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a> remains the long-term memory across sessions. The <code>run_agent</code> MCP tool grows up too: <code>driver</code>, <code>skill</code>, and <code>systemPrompt</code> parameters let Claude Code drive tachi-agent as a fully configurable sub-agent.</p>
           </li>
         </ol>
       </div>

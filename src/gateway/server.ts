@@ -1,7 +1,7 @@
 // src/gateway/server.ts
 import http from "node:http";
 import type { AgentRuntime } from "../runtime.js";
-import type { AgentEvent } from "../types.js";
+import type { AgentEvent, HistoryTurn } from "../types.js";
 import type { GatewayEvent } from "./types.js";
 import { RunRegistry } from "./registry.js";
 import { parseBearer, resolveTenant } from "./auth.js";
@@ -132,6 +132,21 @@ export function createGatewayServer(
         if (allowTools !== undefined && (!Array.isArray(allowTools) || allowTools.length > 64 || allowTools.some((t) => typeof t !== "string"))) {
           return json(res, 400, { error: "allowTools must be an array of at most 64 strings" });
         }
+        // Conversation history (chat continuity): user/assistant turns only,
+        // bounded in count and total size. The orchestrator re-caps defensively.
+        let history: HistoryTurn[] | undefined;
+        if (body.history !== undefined) {
+          const raw = body.history;
+          const shapeOk = Array.isArray(raw) && raw.length <= 40 &&
+            raw.every((t) => t !== null && typeof t === "object" &&
+              ((t as { role?: unknown }).role === "user" || (t as { role?: unknown }).role === "assistant") &&
+              typeof (t as { content?: unknown }).content === "string");
+          const totalChars = shapeOk ? (raw as HistoryTurn[]).reduce((n, t) => n + t.content.length, 0) : 0;
+          if (!shapeOk || totalChars > 32 * 1024) {
+            return json(res, 400, { error: "history must be at most 40 {role:'user'|'assistant', content} turns totalling at most 32KiB" });
+          }
+          history = raw as HistoryTurn[];
+        }
 
         // Clamp caller-supplied iterations to [1, ceiling].
         const reqIter =
@@ -145,7 +160,7 @@ export function createGatewayServer(
           void opts.eventLog?.append(record.id, seq, e).catch(() => { /* logging must never break a run */ });
         };
         runtime
-          .orchestrator({ maxIterations: reqIter, timeoutMs: opts.timeoutMs, signal: record.controller.signal, onEvent, systemPrompt, allowTools }, typeof driver === "string" ? driver : undefined)
+          .orchestrator({ maxIterations: reqIter, timeoutMs: opts.timeoutMs, signal: record.controller.signal, onEvent, systemPrompt, allowTools, history }, typeof driver === "string" ? driver : undefined)
           .run(task)
           .then(
             (result) => registry.finish(record.id, record.controller.signal.aborted ? "aborted" : "done", result),

@@ -34,10 +34,10 @@
       <p class="eyebrow hero-anim d1">// from install to first chat</p>
       <h1 class="hero-anim d2">Get started</h1>
       <p class="hero-sub hero-anim d3">
-        No API keys, no cloud account. Install globally, pull a local model, and open an interactive
-        chat with bare <code>tachi-agent</code>. Run <code>tachi-agent doctor</code> first to
-        verify your environment. <strong>Ctrl-C</strong> halts cleanly; progress to stderr,
-        the answer to stdout.
+        No API keys, no cloud account. <strong>One line installs the whole stack</strong> — Node,
+        Ollama, agent + memory + council — and hands off to the <code>tachi-agent setup</code>
+        wizard. Then open an interactive chat with bare <code>tachi-agent</code>.
+        <strong>Ctrl-C</strong> halts cleanly; progress to stderr, the answer to stdout.
       </p>
     </div>
   </header>
@@ -49,23 +49,27 @@
         <div class="sec-head">
           <span class="numeral" aria-hidden="true">01</span>
           <span class="sec-kicker"><span class="box">┌─</span> install &amp; chat</span>
-          <h2 class="sec-title">Install globally. Open a chat. Done.</h2>
+          <h2 class="sec-title">One line installs everything. Then just chat.</h2>
         </div>
         <div class="code" data-lang="bash">
           <div class="code-head">
-            <span class="code-label">bash — global install + chat quickstart</span>
+            <span class="code-label">bash — one-line stack install + chat quickstart</span>
             <button class="copy-btn" aria-label="Copy commands to clipboard">copy</button>
           </div>
-<pre><span class="c"># 1. install globally (or: npm install &amp;&amp; npm run build &amp;&amp; npm link)</span>
-npm i -g tachi-agent
+<pre><span class="c"># ONE LINE — installs Node ≥ 22 + Ollama if missing, then tachi-agent + dokoro</span>
+<span class="c"># + tachibot-mcp, and hands off to the interactive setup wizard</span>
+curl -fsSL https://bypawel.github.io/tachi-agent/install.sh | sh
 
-<span class="c"># 2. pull a local brain (or set TACHI_DRIVER=openai + OPENAI_API_KEY)</span>
+<span class="c"># — or manually —</span>
+<span class="c"># 1. install the stack globally</span>
+npm i -g tachi-agent dokoro tachibot-mcp
+
+<span class="c"># 2. pull a local brain (the wizard offers OpenRouter as the one-key alternative)</span>
 ollama serve &amp;
 ollama pull qwen2.5
 
-<span class="c"># 3. point at your MCP servers</span>
-<span class="k">export</span> TACHIBOT_CMD=<span class="s">"npx -y tachibot-mcp"</span>
-<span class="k">export</span> DOKORO_CMD=<span class="s">"npx -y @devlog-mcp/core"</span>   <span class="c"># optional</span>
+<span class="c"># 3. run the wizard — picks a brain, wires MCP servers, writes ~/.tachi/.env (chmod 600)</span>
+tachi-agent setup
 
 <span class="c"># 4. preflight check</span>
 tachi-agent doctor
@@ -75,10 +79,13 @@ tachi-agent</pre>
         </div>
         <div class="prose">
           <p>
+            <code>tachi-agent setup</code> is <strong>re-runnable and merge-preserving</strong>: existing values in <code>~/.tachi/.env</code> become the presented defaults, and every tachi-agent bin loads that file as defaults at startup (real env vars always win; <code>TACHI_ENV_FILE</code> overrides the path). Pick local Ollama, or paste <em>one</em> OpenRouter key to power the agent <strong>and</strong> the whole tachibot council.
+          </p>
+          <p>
             <code>tachi-agent doctor</code> checks your Ollama endpoint, required env vars, and MCP server commands — run it the first time and whenever something looks off.
           </p>
           <p>
-            Bare <code>tachi-agent</code> opens a persistent REPL session. The prompt shows <code>tachi [driver·skill] ›</code>. Type your task, or use <code>/help</code> to see the unified command list.
+            Bare <code>tachi-agent</code> opens a persistent REPL session. The prompt shows <code>tachi [driver·skill] ›</code>. The session is <strong>multi-turn</strong> — prior exchanges carry into each run; <code>/reset</code> starts fresh. Type your task, or use <code>/help</code> to see the unified command list.
             <kbd>Ctrl</kbd>+<kbd>D</kbd> or <code>/exit</code> to leave.
           </p>
         </div>
@@ -125,11 +132,11 @@ npm run build  <span class="c"># tsc → dist/</span></pre>
         </div>
         <div class="prose">
           <ul>
-            <li><strong>CLI / REPL (default)</strong> — bare <code>tachi-agent</code> opens the interactive REPL; pass a string for a one-shot task.</li>
+            <li><strong>CLI / REPL (default)</strong> — bare <code>tachi-agent</code> opens the interactive REPL; multi-turn (the conversation carries across turns; <code>/reset</code> clears); pass a string for a one-shot task.</li>
             <li><strong>Skills</strong> — <code>--skill &lt;name&gt;</code> loads a <code>.tachi/skills/*.md</code> recipe (system prompt + tool allowlist + driver preset).</li>
-            <li><strong>Telegram</strong> — bot front-end with allowed user-ids; unified <code>/commands</code> surface.</li>
+            <li><strong>Telegram</strong> — bot front-end with allowed user-ids; unified <code>/commands</code> surface and per-chat multi-turn memory.</li>
             <li><strong>Slack</strong> — Socket Mode app.</li>
-            <li><strong>Claude Code</strong> — connect in via the <code>run_agent</code> MCP server.</li>
+            <li><strong>Claude Code</strong> — connect in via the <code>run_agent</code> MCP server; pass <code>driver</code> / <code>skill</code> / <code>systemPrompt</code> to run tachi-agent as a configurable sub-agent.</li>
             <li><strong>HTTP / SSE Gateway</strong> — async jobs + streamed events.</li>
             <li><strong>OpenClaw bridge</strong> — delegate over the gateway with <code>GatewayClient</code>.</li>
             <li><strong>Swarm</strong> — fan-out / synthesize bin: <code>npm run swarm</code>.</li>
@@ -158,6 +165,7 @@ npm run build  <span class="c"># tsc → dist/</span></pre>
               <tr><td><code>OLLAMA_MODEL</code></td><td>Local model id, e.g. <code>qwen2.5</code>.</td></tr>
               <tr><td><code>TACHIBOT_CMD</code></td><td>Command to launch the <a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a> MCP server (council tools).</td></tr>
               <tr><td><code>DOKORO_CMD</code></td><td>Command to launch the <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a> MCP server (memory). Optional.</td></tr>
+              <tr><td><code>TACHI_ENV_FILE</code></td><td>Path of the wizard-managed env file (default <code>~/.tachi/.env</code>). Every bin loads it as <em>defaults</em> at startup; real env vars always win.</td></tr>
               <tr><td><code>TACHI_ALLOW</code></td><td>Tool allowlist — restricts which namespaced tools the agent may call.</td></tr>
               <tr><td><code>TACHI_SWARM_ROLES</code></td><td>Comma-separated roles for the swarm; <code>name</code> or <code>name:driver</code>; empty = defaults.</td></tr>
               <tr><td><code>GATEWAY_TOKEN</code> / <code>GATEWAY_PORT</code></td><td>Bearer token and port for the HTTP/SSE gateway.</td></tr>

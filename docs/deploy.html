@@ -65,9 +65,12 @@
             <h3>Gateway</h3>
             <p>
               Wrap <code>orchestrator.run</code> behind a thin service — a <code>run_agent</code>
-              MCP server for Claude Code, or an HTTP/SSE gateway for Telegram/Slack. Put
-              <strong>auth, rate-limits, and a per-tenant allowlist</strong> at the edge. Keep the
-              model local even when hosted; cloud secrets stay in <code>tachibot-mcp</code>.
+              MCP server for Claude Code (with <code>driver</code> / <code>skill</code> /
+              <code>systemPrompt</code> parameters for configurable sub-agent runs), or an HTTP/SSE
+              gateway for Telegram/Slack (<code>POST /runs</code> accepts <code>history</code> for
+              multi-turn continuity). Put <strong>auth, rate-limits, and a per-tenant
+              allowlist</strong> at the edge. Keep the model local even when hosted; cloud secrets
+              stay in <code>tachibot-mcp</code>.
             </p>
           </article>
         </div>
@@ -101,9 +104,9 @@ npm run build &amp;&amp; node dist/frontends/gateway.js</pre>
             </thead>
             <tbody>
               <tr>
-                <td><code>POST /runs</code><br /><span style="color:var(--muted);font-size:.85em">{task, maxIterations?}</span></td>
+                <td><code>POST /runs</code><br /><span style="color:var(--muted);font-size:.85em">{task, maxIterations?, driver?, systemPrompt?, allowTools?, history?}</span></td>
                 <td><code>202 {run_id}</code></td>
-                <td>Start a run (async job).</td>
+                <td>Start a run (async job). <code>history</code> = up to 40 prior user/assistant turns for multi-turn continuity.</td>
               </tr>
               <tr>
                 <td><code>GET /runs/:id</code></td>

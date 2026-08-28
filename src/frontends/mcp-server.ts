@@ -19,6 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { buildAgentFromEnv, type AgentRuntime } from "../runtime.js";
 import { loadUserEnv } from "../env-bootstrap.js";
+import { loadSkills, findSkill, type Skill } from "../skills.js";
 
 export const DEFAULT_MAX_ITERATIONS = 8;
 export const DEFAULT_TIMEOUT_MS = 90_000;
@@ -33,13 +34,43 @@ export function resolveRunTimeoutMs(): number {
   const raw = process.env.TACHI_RUN_TIMEOUT_MS;
   if (raw === undefined) return DEFAULT_TIMEOUT_MS;
   const ms = Number(raw);
-  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
+  return Number.isFinite(ms) && ms > 0 ? Math.floor(Math.min(ms, MAX_TIMEOUT_MS)) : DEFAULT_TIMEOUT_MS;
 }
 
 export interface RunAgentArgs {
   task: string;
   maxIterations?: number;
   timeoutMs?: number;
+  /** Override the brain for this run (registered driver name — multi-heart seam). */
+  driver?: string;
+  /** Skill bundle name from .tachi/skills — resolved to systemPrompt/allowTools/driver before the run. */
+  skill?: string;
+  /** Extra system-prompt guidance prepended to the agent's instructions. */
+  systemPrompt?: string;
+  /** Per-run tool-surface narrowing (set by skill resolution; fail-closed). */
+  allowTools?: string[];
+}
+
+/**
+ * Resolve a `skill` arg against the loaded skill bundles — same semantics as the
+ * chat layer (resolveRunOptions): explicit driver > skill.driver; the skill's
+ * prompt precedes any explicit systemPrompt; skill.tools narrows the surface.
+ * Unknown skill throws actionably (available names listed).
+ */
+export function resolveSkillArgs(args: RunAgentArgs, skills: Skill[]): RunAgentArgs {
+  if (!args.skill) return args;
+  const skill = findSkill(skills, args.skill);
+  if (!skill) {
+    const names = skills.map((s) => s.name).join(", ") || "(none — add .md files under .tachi/skills)";
+    throw new Error(`unknown skill "${args.skill}" — available: ${names}`);
+  }
+  const systemPrompt = [skill.prompt, args.systemPrompt].filter(Boolean).join("\n\n");
+  return {
+    ...args,
+    driver: args.driver ?? skill.driver,
+    ...(systemPrompt ? { systemPrompt } : {}),
+    ...(skill.tools && skill.tools.length > 0 ? { allowTools: skill.tools } : {}),
+  };
 }
 
 interface TextResult {
@@ -64,11 +95,16 @@ export async function runAgentHandler(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await runtime
-      .orchestrator({
-        maxIterations: args.maxIterations ?? defaults.maxIterations,
-        timeoutMs,
-        signal: controller.signal,
-      })
+      .orchestrator(
+        {
+          maxIterations: args.maxIterations ?? defaults.maxIterations,
+          timeoutMs,
+          signal: controller.signal,
+          ...(args.systemPrompt !== undefined ? { systemPrompt: args.systemPrompt } : {}),
+          ...(args.allowTools !== undefined ? { allowTools: args.allowTools } : {}),
+        },
+        args.driver, // unknown driver → registry throws → caught below as isError
+      )
       .run(args.task);
     const header = `[halted: ${res.haltedBy} · ${res.iterations} steps · ${res.toolCalls.length} tool calls]`;
     return { content: [{ type: "text", text: `${header}\n\n${res.answer}` }] };
@@ -107,10 +143,30 @@ async function main(): Promise<void> {
             `Wall-clock cap for this run in ms (default ${runTimeoutMs}). ` +
             "The MCP client's own call timeout must be >= this or the client aborts first.",
           ),
+        driver: z
+          .string().optional()
+          .describe("Override the brain for this run (registered driver name, e.g. 'openrouter')"),
+        skill: z
+          .string().optional()
+          .describe("Skill bundle from .tachi/skills to apply (system prompt + tool narrowing + optional driver)"),
+        systemPrompt: z
+          .string().max(16_384).optional()
+          .describe("Extra system-prompt guidance prepended to the agent's instructions"),
       },
     },
     async (args) => {
-      const r = await runAgentHandler(runtime, args as RunAgentArgs, {
+      let resolved: RunAgentArgs;
+      try {
+        // Skills are re-read per call (cheap fs reads) so newly added bundles
+        // work without restarting the singleton server.
+        resolved = (args as RunAgentArgs).skill
+          ? resolveSkillArgs(args as RunAgentArgs, await loadSkills())
+          : (args as RunAgentArgs);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { content: [{ type: "text" as const, text: `tachi-agent error: ${msg}` }], isError: true };
+      }
+      const r = await runAgentHandler(runtime, resolved, {
         maxIterations: DEFAULT_MAX_ITERATIONS,
         timeoutMs: runTimeoutMs,
       });

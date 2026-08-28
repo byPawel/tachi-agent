@@ -9,6 +9,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   handleChatLine,
   resolveRunOptions,
+  pushHistory,
+  SESSION_HISTORY_MAX,
   CHAT_HELP,
   type ChatSession,
   type ChatDeps,
@@ -258,14 +260,64 @@ describe("/skill", () => {
 // /reset
 // ---------------------------------------------------------------------------
 describe("/reset", () => {
-  it("clears both driver and skill on the session and confirms", async () => {
-    const deps = makeDeps({ driver: "openai", skill: SKILL_RESEARCHER });
+  it("clears driver, skill AND history on the session and confirms", async () => {
+    const deps = makeDeps({
+      driver: "openai",
+      skill: SKILL_RESEARCHER,
+      history: [{ role: "user", content: "q" }, { role: "assistant", content: "a" }],
+    });
     const action = await handle("/reset", deps);
     expect(action.kind).toBe("reply");
     expect(deps.session.driver).toBeUndefined();
     expect(deps.session.skill).toBeUndefined();
+    expect(deps.session.history).toBeUndefined();
     if (action.kind !== "reply") throw new Error("narrowing");
     expect(action.text.toLowerCase()).toContain("reset");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conversation history (chat continuity)
+// ---------------------------------------------------------------------------
+describe("pushHistory", () => {
+  it("appends one user+assistant exchange", () => {
+    const session = makeSession();
+    pushHistory(session, "who created Linux?", "Linus Torvalds.");
+    expect(session.history).toEqual([
+      { role: "user", content: "who created Linux?" },
+      { role: "assistant", content: "Linus Torvalds." },
+    ]);
+  });
+
+  it("skips empty answers and [halted:…] placeholders", () => {
+    const session = makeSession();
+    pushHistory(session, "task", "");
+    pushHistory(session, "task", "   ");
+    pushHistory(session, "task", "[halted: timeout, no final answer produced]");
+    expect(session.history).toBeUndefined();
+  });
+
+  it("caps the rolling window at SESSION_HISTORY_MAX, dropping the oldest", () => {
+    const session = makeSession();
+    for (let i = 0; i < SESSION_HISTORY_MAX; i++) pushHistory(session, `q${i}`, `a${i}`);
+    expect(session.history).toHaveLength(SESSION_HISTORY_MAX);
+    expect(session.history![0].content).toBe(`q${SESSION_HISTORY_MAX / 2}`);
+    expect(session.history![SESSION_HISTORY_MAX - 1].content).toBe(`a${SESSION_HISTORY_MAX - 1}`);
+  });
+});
+
+describe("resolveRunOptions history pass-through", () => {
+  it("includes session.history when present", () => {
+    const history = [
+      { role: "user" as const, content: "q" },
+      { role: "assistant" as const, content: "a" },
+    ];
+    expect(resolveRunOptions(makeSession({ history }))).toEqual({ history });
+  });
+
+  it("omits history when the session has none (default path unchanged)", () => {
+    expect(resolveRunOptions(makeSession())).toEqual({});
+    expect(resolveRunOptions(makeSession({ history: [] }))).toEqual({});
   });
 });
 

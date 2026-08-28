@@ -84,13 +84,14 @@ export async function createUnifiedClient(
 
     return {
       async run(text, opts) {
-        const { onEvent, signal, maxIterations, driver, systemPrompt, allowTools } = opts;
-        // Build POST /runs body — include the three new run options when provided.
+        const { onEvent, signal, maxIterations, driver, systemPrompt, allowTools, history } = opts;
+        // Build POST /runs body — include the optional run options when provided.
         const body: Record<string, unknown> = { task: text };
         if (maxIterations !== undefined) body.maxIterations = maxIterations;
         if (driver !== undefined) body.driver = driver;
         if (systemPrompt !== undefined) body.systemPrompt = systemPrompt;
         if (allowTools !== undefined) body.allowTools = allowTools;
+        if (history !== undefined && history.length > 0) body.history = history;
 
         // POST /runs directly with extended body, then attach to stream events.
         const fetchFn = fetchImpl ?? fetch;

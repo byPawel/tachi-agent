@@ -15,7 +15,7 @@
 import { createUnifiedClient } from "../client/unified.js";
 import type { AgentEvent } from "../types.js";
 import { parseAllowSet, mdBoldHeadings, toolEmoji as _toolEmoji, formatStepEvent } from "./shared.js";
-import { handleChatLine, resolveRunOptions, type ChatSession, type ChatDeps } from "../chat-commands.js";
+import { handleChatLine, resolveRunOptions, pushHistory, type ChatSession, type ChatDeps } from "../chat-commands.js";
 import { loadSkills } from "../skills.js";
 import { taskAdd, taskList, taskShow } from "../cli-commands.js";
 import { loadUserEnv } from "../env-bootstrap.js";
@@ -319,6 +319,8 @@ async function main(): Promise<void> {
           try {
             const runOpts = resolveRunOptions(session);
             const res = await client.run(taskText, { onEvent, maxIterations: 10, timeoutMs: 180_000, ...runOpts });
+            // Chat continuity: the chat's next turn sees this exchange (cleared by /reset).
+            pushHistory(session, taskText, res.answer);
             const answer = res.answer.startsWith("[halted")
               ? `⏱ Stopped early (${res.haltedBy}). A deep council on a local model can take a while — try a simpler ask, or send it again.`
               : res.answer;

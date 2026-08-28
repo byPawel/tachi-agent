@@ -187,6 +187,35 @@ describe("runSetup — re-run preserves existing values", () => {
     await runSetup(h);
     expect(h.serviceInstalls).toEqual(["/home/u/.tachi/.env"]);
   });
+
+  it("refreshes file-loaded env values in-process so the doctor run sees the NEW config", async () => {
+    // loadUserEnv seeded TACHI_DRIVER=ollama from the OLD file; the wizard
+    // switches to openrouter — env must reflect that for the same-process doctor.
+    const h = makeDeps(["2", "sk-or-v1-goodkey"], {
+      env: { TACHI_DRIVER: "ollama" },
+      envFileKeys: ["TACHI_DRIVER"],
+      readFile: async () => "TACHI_DRIVER=ollama\n",
+      fetchImpl: fetchStub((url) =>
+        url.includes("openrouter.ai") ? new Response("{}", { status: 200 }) : tagsResponse(["qwen2.5:latest"]),
+      ),
+    });
+    await runSetup(h);
+    expect(h.env.TACHI_DRIVER).toBe("openrouter");
+  });
+
+  it("never overrides a REAL shell env var (key not in envFileKeys)", async () => {
+    const h = makeDeps([], { env: { TACHI_DRIVER: "openai" } });
+    await runSetup(h);
+    expect(h.env.TACHI_DRIVER).toBe("openai"); // in-process: the shell wins
+    expect(writtenEnv(h).TACHI_DRIVER).toBe("ollama"); // file: the wizard's choice
+  });
+
+  it("Enter on an extra council key does NOT copy a shell-env secret into the file", async () => {
+    // brain default; extra-keys → y; all five key prompts answered with Enter.
+    const h = makeDeps(["", "y"], { env: { OPENAI_API_KEY: "sk-live-supersecret" } });
+    await runSetup(h);
+    expect(writtenEnv(h).OPENAI_API_KEY).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -201,6 +230,11 @@ describe("serializeEnvFile", () => {
     // sorted keys, header comment present
     expect(out.startsWith("#")).toBe(true);
     expect(out.indexOf("A_CMD")).toBeLessThan(out.indexOf("B_KEY"));
+  });
+
+  it("collapses newlines in values — no phantom keys injected on re-parse", () => {
+    const out = serializeEnvFile({ A: "line1\nEVIL=1", C: "ok" });
+    expect(parseEnvFile(out)).toEqual({ A: "line1 EVIL=1", C: "ok" });
   });
 });
 

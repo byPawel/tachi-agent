@@ -20,6 +20,7 @@ import { localClient, createUnifiedClient, type UnifiedClient } from "../client/
 import {
   handleChatLine,
   resolveRunOptions,
+  pushHistory,
   type ChatDeps,
   type ChatSession,
 } from "../chat-commands.js";
@@ -176,6 +177,8 @@ export async function runRepl(opts: { driver?: string; skill?: string } = {}): P
         ...resolveRunOptions(session),
       });
       console.log("\n" + res.answer + "\n");
+      // Chat continuity: the next turn sees this exchange (cleared by /reset).
+      pushHistory(session, text, res.answer);
     } catch (e) {
       console.error(`✖ ${e instanceof Error ? e.message : String(e)}`);
     } finally {

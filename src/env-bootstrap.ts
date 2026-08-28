@@ -32,14 +32,19 @@ export function userEnvPath(env: Record<string, string | undefined>, home = home
   return env.TACHI_ENV_FILE?.trim() || join(home, ".tachi", ".env");
 }
 
-/** Load the user env file into process.env as defaults. Missing file → no-op. */
-export async function loadUserEnv(): Promise<void> {
+/**
+ * Load the user env file into process.env as defaults. Missing file → no-op.
+ * Returns the keys it applied: `setup` needs them to tell file-loaded values
+ * (safe to refresh in-process after the wizard rewrites the file) from real
+ * shell env vars (never overridden).
+ */
+export async function loadUserEnv(): Promise<string[]> {
   const path = userEnvPath(process.env as Record<string, string | undefined>);
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch {
-    return;
+    return [];
   }
-  applyEnvDefaults(process.env as Record<string, string | undefined>, parseEnvFile(raw));
+  return applyEnvDefaults(process.env as Record<string, string | undefined>, parseEnvFile(raw));
 }

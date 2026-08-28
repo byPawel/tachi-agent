@@ -31,6 +31,16 @@ export interface ChatMessage {
   toolCallId?: string;
 }
 
+/**
+ * One prior conversation turn for chat continuity. Deliberately narrower than
+ * ChatMessage: only user/assistant text can be replayed into a new run — tool
+ * turns and system prompts are per-run state and must not be injected.
+ */
+export interface HistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface DriverResult {
   /** Final assistant text (empty when the turn is purely tool calls). */
   content: string;
@@ -93,6 +103,14 @@ export interface OrchestratorOptions {
   timeoutMs?: number;
   /** Extra system-prompt guidance prepended to the agent's instructions. */
   systemPrompt?: string;
+  /**
+   * Prior conversation turns (chat continuity). Injected between the system
+   * message and the current task so multi-turn chats keep context across runs —
+   * without it every REPL/Telegram turn is stateless and follow-up questions
+   * lose their referent. The orchestrator caps this defensively (turn count +
+   * chars, most recent kept); front-ends maintain the rolling window.
+   */
+  history?: HistoryTurn[];
   /** Cooperative cancellation — abort to stop the agent between steps (e.g. a Slack "/stop" or Ctrl-C). */
   signal?: AbortSignal;
   /** Streaming hook — called as the run progresses, for live front-end output. */

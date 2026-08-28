@@ -11,6 +11,7 @@
  * command rewrites are never silent.
  */
 import type { Skill } from "./skills.js";
+import type { HistoryTurn } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -19,6 +20,27 @@ import type { Skill } from "./skills.js";
 export interface ChatSession {
   driver?: string;
   skill?: Skill;
+  /** Rolling conversation history — chat continuity across agent runs. */
+  history?: HistoryTurn[];
+}
+
+/**
+ * Session-level history cap (entries, i.e. 20 user/assistant exchanges). The
+ * orchestrator re-caps by chars; this just stops a long-lived Telegram chat
+ * from growing without bound in memory.
+ */
+export const SESSION_HISTORY_MAX = 40;
+
+/**
+ * Record one completed exchange on the session (front-ends call this after a
+ * successful run). Empty answers and the orchestrator's `[halted: …]`
+ * placeholders are not conversation content and are not recorded.
+ */
+export function pushHistory(session: ChatSession, task: string, answer: string): void {
+  if (!task.trim() || !answer.trim() || answer.startsWith("[halted:")) return;
+  const h = session.history ?? (session.history = []);
+  h.push({ role: "user", content: task }, { role: "assistant", content: answer });
+  if (h.length > SESSION_HISTORY_MAX) h.splice(0, h.length - SESSION_HISTORY_MAX);
 }
 
 export interface ChatDeps {
@@ -52,7 +74,7 @@ export const CHAT_HELP = `commands:
   /status                show session state (driver, skill, mode)
   /driver <name>|off     set or clear the session driver
   /skill <name>|off      activate or clear a skill bundle
-  /reset                 clear the full session (driver + skill)
+  /reset                 clear the full session (driver + skill + history)
   /jury <question>       run a cross-model jury verdict via tachibot_jury
   /search <query>        search with tachibot_grok_search or perplexity
   /think <question>      reason step by step over a question
@@ -76,13 +98,20 @@ const DAEMON_HINT =
 /**
  * Session → run options. Single source of the precedence rule:
  * session.driver > skill.driver > undefined (env default applies downstream).
+ * Conversation history rides along so every front-end gets continuity for free.
  */
 export function resolveRunOptions(session: ChatSession): {
   driver?: string;
   systemPrompt?: string;
   allowTools?: string[];
+  history?: HistoryTurn[];
 } {
-  const result: { driver?: string; systemPrompt?: string; allowTools?: string[] } = {};
+  const result: {
+    driver?: string;
+    systemPrompt?: string;
+    allowTools?: string[];
+    history?: HistoryTurn[];
+  } = {};
 
   // Driver precedence: session.driver > skill.driver > undefined
   if (session.driver !== undefined) {
@@ -99,6 +128,10 @@ export function resolveRunOptions(session: ChatSession): {
     if (session.skill.tools && session.skill.tools.length > 0) {
       result.allowTools = session.skill.tools;
     }
+  }
+
+  if (session.history && session.history.length > 0) {
+    result.history = session.history;
   }
 
   return result;
@@ -194,7 +227,8 @@ export async function handleChatLine(
     case "/reset": {
       delete deps.session.driver;
       delete deps.session.skill;
-      return { kind: "reply", text: "Session reset — driver and skill cleared." };
+      delete deps.session.history;
+      return { kind: "reply", text: "Session reset — driver, skill and history cleared." };
     }
 
     // -------------------------------------------------------------------

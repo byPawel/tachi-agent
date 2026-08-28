@@ -28,6 +28,13 @@ export interface SetupDeps {
   installService: (envFile: string) => Promise<void>;
   /** Runs the existing doctor checks. */
   doctor: () => Promise<void>;
+  /**
+   * Keys that loadUserEnv() applied to `env` at bin startup (i.e. values that
+   * came from the env FILE, not the shell). After the wizard rewrites the file,
+   * these are refreshed in `env` so the same-process doctor run sees the new
+   * config; keys NOT listed here are real env vars and still win.
+   */
+  envFileKeys?: string[];
 }
 
 const PROBE_TIMEOUT_MS = 3_000;
@@ -52,6 +59,8 @@ const EXTRA_KEYS = [
  * raw (parseEnvFile takes everything after `=`, so spaces and inner quotes
  * survive); quoting only when the value would be mangled — leading/trailing
  * whitespace (parse trims) or a surrounding-quote lookalike (parse strips).
+ * The dotenv format is line-based, so newlines in a value are collapsed to
+ * spaces — a raw `\n` would otherwise inject phantom KEY=VALUE lines.
  */
 export function serializeEnvFile(entries: Record<string, string>): string {
   const lines = [
@@ -59,7 +68,7 @@ export function serializeEnvFile(entries: Record<string, string>): string {
     "# Loaded as DEFAULTS by tachi-agent bins; real env vars always win.",
   ];
   for (const key of Object.keys(entries).sort()) {
-    const v = entries[key];
+    const v = entries[key].replace(/[\r\n]+/g, " ");
     const fragile = v === "" || /^\s|\s$/.test(v) || /^(".*")$|^('.*')$/.test(v);
     const quoted = fragile ? (v.includes('"') ? `'${v}'` : `"${v}"`) : v;
     lines.push(`${key}=${quoted}`);
@@ -198,8 +207,10 @@ async function collectExtraKeys(deps: SetupDeps, file: Record<string, string>): 
   for (const name of EXTRA_KEYS) {
     const existing = file[name] || deps.env[name] || "";
     const v = await ask(deps, `${name} (Enter to skip)`, existing ? mask(existing) : "");
-    if (!v) continue;
-    file[name] = v === mask(existing) ? existing : v;
+    // Enter = skip: keep the file as-is. In particular, do NOT silently copy a
+    // shell-env secret into the file just because it exists in the environment.
+    if (!v || v === mask(existing)) continue;
+    file[name] = v;
   }
 }
 
@@ -268,8 +279,12 @@ export async function runSetup(deps: SetupDeps): Promise<string> {
   }
 
   // Make the new values visible to the doctor run in this same process.
+  // Keys that loadUserEnv() seeded from the OLD file are refreshed (the file
+  // is their source of truth); anything else set in env is a real shell var
+  // and still wins.
+  const fromFile = new Set(deps.envFileKeys ?? []);
   for (const [k, v] of Object.entries(file)) {
-    if (deps.env[k] === undefined) deps.env[k] = v;
+    if (deps.env[k] === undefined || fromFile.has(k)) deps.env[k] = v;
   }
   deps.stdout("");
   deps.stdout("Running doctor…");

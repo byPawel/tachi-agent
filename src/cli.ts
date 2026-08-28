@@ -39,7 +39,7 @@ function makeServiceDeps(): ServiceDeps {
 }
 
 async function main() {
-  await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
+  const envFileKeys = await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   const argv = process.argv.slice(2);
   const parsed = parseCliArgs(argv);
 
@@ -53,6 +53,7 @@ async function main() {
     try {
       await runSetup({
         env: process.env as Record<string, string | undefined>,
+        envFileKeys,
         home: homedir(),
         stdout: (line) => console.log(line),
         // EOF / closed stdin (piped, CI) → "" = accept the default for the rest.
