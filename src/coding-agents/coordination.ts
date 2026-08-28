@@ -1,4 +1,5 @@
 import type { AgentTool } from "../types.js";
+import { parseClaimResult } from "./claim-parse.js";
 
 export interface CoordinationHost {
   internalTools(): AgentTool[];
@@ -11,6 +12,7 @@ export interface CodingCoordinationContext {
   task: string;
   cwd: string;
   files?: string[];
+  timeoutMs?: number;
   signal?: AbortSignal;
 }
 
@@ -33,7 +35,7 @@ async function call(
 export async function beginCodingCoordination(
   host: CoordinationHost,
   context: CodingCoordinationContext,
-): Promise<{ claimed: boolean }> {
+): Promise<{ claimed: boolean; conflict: boolean }> {
   await call(host, /presence_ping$/, {
     agent_id: context.agentId,
     session_id: context.sessionId,
@@ -41,19 +43,21 @@ export async function beginCodingCoordination(
     current_focus: context.task.slice(0, 1_000),
   }, context.signal).catch(() => "");
 
-  if (!context.files?.length) return { claimed: false };
+  if (!context.files?.length) return { claimed: false, conflict: false };
+  const ttlSeconds = Math.ceil((context.timeoutMs ?? 600_000) / 1000) + 300;
   const output = await call(host, /file_claim$/, {
     paths: context.files,
     agent_id: context.agentId,
     session_id: context.sessionId,
     intent: context.task.slice(0, 2_000),
     root: context.cwd,
-    ttl_seconds: 3_600,
+    ttl_seconds: ttlSeconds,
   }, context.signal);
-  if (/CONFLICT\s+—\s+NOTHING was claimed/i.test(output)) {
+  const outcome = parseClaimResult(output);
+  if (outcome.conflict) {
     throw new Error(`Dokoro file-claim conflict:\n${output}`);
   }
-  return { claimed: Boolean(output) };
+  return { claimed: outcome.claimed, conflict: false };
 }
 
 /**
