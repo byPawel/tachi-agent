@@ -44,6 +44,17 @@ export function parseClaudeEnvelope(stdout: string): ClaudeParsed {
   } catch {
     return { text: null, isError: true, deniedCalls: 0, raw };
   }
+  // Live CLIs (observed on 2.1.x) emit a JSON ARRAY of stream events whose
+  // last {"type":"result"} entry is the envelope; older docs describe the bare
+  // envelope. Accept both; an array without a result entry fails closed.
+  if (Array.isArray(envelope)) {
+    let resultEntry: unknown = null;
+    for (let i = envelope.length - 1; i >= 0; i -= 1) {
+      const e = envelope[i] as { type?: unknown } | null | undefined;
+      if (e && typeof e === "object" && e.type === "result") { resultEntry = e; break; }
+    }
+    envelope = resultEntry;
+  }
   if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)) {
     return { text: null, isError: true, deniedCalls: 0, raw };
   }

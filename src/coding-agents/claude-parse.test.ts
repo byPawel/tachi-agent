@@ -102,6 +102,31 @@ describe("parseClaudeEnvelope", () => {
     }
   });
 
+  it("parses the live stream-array shape, using the last result entry", () => {
+    // claude 2.1.x -p --output-format json emits an array of events; the
+    // envelope is the trailing {"type":"result"} entry.
+    const raw = JSON.stringify([
+      { type: "system", subtype: "init", session_id: "sess-9", tools: ["Task"] },
+      { type: "assistant", message: { content: [{ type: "text", text: "thinking…" }] } },
+      {
+        type: "result",
+        is_error: false,
+        result: "denial text",
+        session_id: "sess-9",
+        num_turns: 3,
+        permission_denials: [
+          { tool_name: "ExitPlanMode", tool_input: { plan: "## The plan" } },
+        ],
+      },
+    ]);
+    const r = parseClaudeEnvelope(raw);
+    expect(r.text).toBe("## The plan");
+    expect(r.isError).toBe(false);
+    expect(r.deniedCalls).toBe(1);
+    expect(r.sessionId).toBe("sess-9");
+    expect(r.numTurns).toBe(3);
+  });
+
   it("counts ALL denial entries even when some are malformed", () => {
     const raw = envelope({
       result: "denied",
