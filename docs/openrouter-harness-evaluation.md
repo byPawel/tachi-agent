@@ -138,6 +138,16 @@ model against a hermes run on another measures the models, not the harnesses.
 **Pending live run.** No billed evaluation has been executed yet; hermes remains
 the default `openrouter` harness until one is.
 
+**2026-08-29 — implementation complete, offline verification done.** Adapter
+(`openrouter-harness.ts` selector + hermes/codex builders), runner normalization
+(codex-jsonl parse + live streaming, workspace-derived `isolated`,
+`result.harness`), harness-aware preflight/doctor, and MCP harness metadata all
+landed with 690 tests green and a clean build. The prerequisite gate was
+verified live on the dev machine (exit 2, JSON error naming the missing
+credential, zero temp-dir litter). The billed comparison awaits an
+`OPENROUTER_API_KEY` provided at invocation time — per the rubric, hermes stays
+the default until that evidence exists.
+
 When the run happens, paste the NDJSON summary line here together with the model
 id and date, then record the decision:
 
