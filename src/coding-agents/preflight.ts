@@ -7,6 +7,8 @@
  * and return an actionable reason the MCP layer can hand back immediately.
  */
 import { join } from "node:path";
+// Type-only: no runtime import, so preflight stays free of the harness module.
+import type { OpenRouterHarnessName } from "./openrouter-harness.js";
 
 export interface PreflightDeps {
   env: NodeJS.ProcessEnv;
@@ -18,6 +20,16 @@ export interface PreflightDeps {
 export interface PreflightResult {
   ok: boolean;
   reason?: string;
+}
+
+/**
+ * Extra facts the caller already resolved. `openrouter` is one public agent
+ * name over several local CLIs, so the failure text has to say WHICH harness
+ * was probed — otherwise "openrouter CLI not found" points at the wrong binary
+ * and the wrong *_CLI override.
+ */
+export interface PreflightContext {
+  openRouterHarness?: OpenRouterHarnessName;
 }
 
 type Agent = "codex" | "grok" | "hermes" | "openrouter" | "gemini" | "claude";
@@ -63,12 +75,18 @@ export async function preflightCodingAgent(
   agent: Agent,
   command: string,
   deps: PreflightDeps,
+  context: PreflightContext = {},
 ): Promise<PreflightResult> {
+  // The credential rule is per-AGENT (openrouter always needs OPENROUTER_API_KEY,
+  // whichever CLI drives it); only the label names the harness that was probed.
+  const label = agent === "openrouter" && context.openRouterHarness
+    ? `openrouter/${context.openRouterHarness}`
+    : agent;
   if (!(await deps.hasBinary(command))) {
-    return { ok: false, reason: `${agent} CLI "${command}" not found on PATH — install it or set the *_CLI env override` };
+    return { ok: false, reason: `${label} CLI "${command}" not found on PATH — install it or set the *_CLI env override` };
   }
   if (!(await hasCredential(agent, deps))) {
-    return { ok: false, reason: `${agent} has no usable credential — ${CRED_HINT[agent]}` };
+    return { ok: false, reason: `${label} has no usable credential — ${CRED_HINT[agent]}` };
   }
   return { ok: true };
 }

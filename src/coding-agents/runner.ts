@@ -6,7 +6,13 @@ import { preflightCodingAgent, type PreflightDeps } from "./preflight.js";
 import { parseGeminiJson, reviewGuard } from "./gemini-parse.js";
 import { parseClaudeEnvelope } from "./claude-parse.js";
 import { createReviewWorktree, type ReviewWorktree } from "./review-worktree.js";
-import { buildOpenRouterHarnessCommand, resolveOpenRouterHarness } from "./openrouter-harness.js";
+import {
+  buildOpenRouterHarnessCommand,
+  resolveOpenRouterHarness,
+  type OpenRouterHarnessCommand,
+  type OpenRouterHarnessName,
+  type OpenRouterOutputKind,
+} from "./openrouter-harness.js";
 
 export type CodingAgentName = "codex" | "grok" | "hermes" | "openrouter" | "gemini" | "claude";
 export type CodingAgentMode = "review" | "write";
@@ -68,6 +74,8 @@ export interface CodingAgentResult extends ProcessResult {
   model?: string;
   provider?: string;
   isolated: boolean;
+  /** Which local CLI drove the `openrouter` agent. Absent for every other agent. */
+  harness?: OpenRouterHarnessName;
   answer: string;
   trace?: CodingAgentProgress[];
   sessionId?: string;
@@ -114,13 +122,52 @@ export function writeAuthorized(args: { mode?: CodingAgentMode; env?: NodeJS.Pro
   return env.TACHI_CODING_ALLOW_WRITE === "1" || env.TACHI_CODING_ALLOW_WRITE === "true";
 }
 
-/** Build argv without a shell: tasks/models are values, never executable syntax. */
-export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string }): CodingAgentCommand {
-  // A leading dash would let the task masquerade as a CLI flag (option-value
-  // parsing is parser-dependent for grok/hermes; codex gets `--` too).
-  if (/^\s*-/.test(args.task)) {
+/**
+ * A leading dash would let the task masquerade as a CLI flag (option-value
+ * parsing is parser-dependent for grok/hermes; codex gets `--` too).
+ */
+function assertTaskIsNotAFlag(task: string): void {
+  if (/^\s*-/.test(task)) {
     throw new Error('coding agent task must not start with "-" — prefix it, e.g. "Task: …"');
   }
+}
+
+/**
+ * Resolve the OpenRouter harness AND its argv in one shot, keeping the metadata
+ * (`outputKind`, `workspace`) the runner needs to parse stdout and report
+ * isolation. `buildCodingAgentCommand` narrows this to `.command`; only the
+ * runner sees the rest.
+ */
+export function buildOpenRouterHarnessSpec(
+  args: RunCodingAgentArgs & { cwd: string },
+): OpenRouterHarnessCommand {
+  assertTaskIsNotAFlag(args.task);
+  const orModel = openRouterCodingModel(args.model);
+  if (!orModel) {
+    throw new Error(
+      "openrouter coding agent requires an explicit model, TACHI_OPENROUTER_CODING_MODEL, or OPENROUTER_MODEL",
+    );
+  }
+  // One public agent name, pluggable local harness. The adapter owns the argv
+  // for every harness; the leading-dash guard above still applies to all of them.
+  return buildOpenRouterHarnessCommand(
+    resolveOpenRouterHarness(process.env),
+    {
+      task: args.task,
+      cwd: args.cwd,
+      model: orModel,
+      mode: args.mode ?? "review",
+      isolate: args.isolate !== false,
+      maxTurns: clampInt(args.maxTurns, 40, 1, 500),
+      timeoutMs: args.timeoutMs ?? DEFAULT_CODING_TIMEOUT_MS,
+    },
+    process.env,
+  );
+}
+
+/** Build argv without a shell: tasks/models are values, never executable syntax. */
+export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string }): CodingAgentCommand {
+  assertTaskIsNotAFlag(args.task);
   const mode = args.mode ?? "review";
   const maxTurns = clampInt(args.maxTurns, 40, 1, 500);
 
@@ -179,29 +226,7 @@ export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string
     return { command: envCommand("grok"), args: argv, cwd: args.cwd, env: buildWorkerEnv("grok", process.env) };
   }
 
-  if (args.agent === "openrouter") {
-    // One public agent name, pluggable local harness. The adapter owns the argv
-    // for every harness; the leading-dash guard above still applies to all of them.
-    const orModel = openRouterCodingModel(args.model);
-    if (!orModel) {
-      throw new Error(
-        "openrouter coding agent requires an explicit model, TACHI_OPENROUTER_CODING_MODEL, or OPENROUTER_MODEL",
-      );
-    }
-    return buildOpenRouterHarnessCommand(
-      resolveOpenRouterHarness(process.env),
-      {
-        task: args.task,
-        cwd: args.cwd,
-        model: orModel,
-        mode,
-        isolate: args.isolate !== false,
-        maxTurns,
-        timeoutMs: args.timeoutMs ?? DEFAULT_CODING_TIMEOUT_MS,
-      },
-      process.env,
-    ).command;
-  }
+  if (args.agent === "openrouter") return buildOpenRouterHarnessSpec({ ...args, mode, maxTurns }).command;
 
   const provider = args.provider?.trim();
   const model = args.model?.trim();
@@ -523,7 +548,17 @@ export async function runCodingAgent(
   }
   if (!args.task?.trim()) throw new Error("coding agent task must not be empty");
   const cwd = await resolveCodingCwd(args.cwd);
-  const command = envCommand(args.agent);
+  const mode = args.mode ?? "review";
+  const visibility = args.visibility ?? "trace";
+  const timeoutMs = clampInt(args.timeoutMs, DEFAULT_CODING_TIMEOUT_MS, 1_000, MAX_CODING_TIMEOUT_MS);
+  const model = args.agent === "openrouter" ? openRouterCodingModel(args.model) : args.model?.trim();
+  // Resolve the OpenRouter harness ONCE, before preflight: it decides which
+  // binary we probe, how we parse stdout, and whether the run is isolated.
+  // An unrecognized selector fails closed here, before anything is spawned.
+  const harnessSpec = args.agent === "openrouter"
+    ? buildOpenRouterHarnessSpec({ ...args, task: args.task.trim(), cwd, timeoutMs, mode, model })
+    : undefined;
+  const command = harnessSpec?.command.command ?? envCommand(args.agent);
   const pf = await preflightCodingAgent(args.agent, command, {
     env: process.env,
     hasBinary: async (cmd) => {
@@ -540,26 +575,27 @@ export async function runCodingAgent(
       });
     },
     fileExists: async (p) => { try { await access(p); return true; } catch { return false; } },
-  } satisfies PreflightDeps);
+  } satisfies PreflightDeps, harnessSpec ? { openRouterHarness: harnessSpec.harness } : {});
   if (!pf.ok) throw new Error(`${args.agent} preflight failed: ${pf.reason}`);
-  const mode = args.mode ?? "review";
-  const visibility = args.visibility ?? "trace";
-  const timeoutMs = clampInt(args.timeoutMs, DEFAULT_CODING_TIMEOUT_MS, 1_000, MAX_CODING_TIMEOUT_MS);
-  const model = args.agent === "openrouter" ? openRouterCodingModel(args.model) : args.model?.trim();
   // Gemini review runs in a throwaway detached-HEAD worktree: its headless
   // plan mode is not reliably read-only, so the requested checkout is never
   // the spawn cwd. The tamper guard then audits the disposable copy.
   const worktree = args.agent === "gemini" && mode === "review"
     ? await worktreeFactory(cwd)
     : undefined;
-  const spec = buildCodingAgentCommand({ ...args, task: args.task.trim(), cwd: worktree?.dir ?? cwd, timeoutMs, mode, model });
+  const spec = harnessSpec?.command
+    ?? buildCodingAgentCommand({ ...args, task: args.task.trim(), cwd: worktree?.dir ?? cwd, timeoutMs, mode, model });
+  // Codex JSONL is a harness property, not an agent name: the codex-backed
+  // OpenRouter harness emits it too, so it gets live streaming + the same parser.
+  const outputKind: OpenRouterOutputKind = harnessSpec?.outputKind
+    ?? (args.agent === "codex" ? "codex-jsonl" : "plain");
   let progressQueue = Promise.resolve();
   const publish = (update: CodingAgentProgress) => {
     if (visibility !== "live" || !args.onProgress) return;
     progressQueue = progressQueue.then(() => args.onProgress!(update)).catch(() => undefined);
   };
   publish({ kind: "status", message: `Starting ${args.agent} coding agent in ${mode} mode.` });
-  const decoder = args.agent === "codex" && visibility === "live"
+  const decoder = outputKind === "codex-jsonl" && visibility === "live"
     ? codexJsonlDecoder((event) => {
       const update = codexProgressFromEvent(event);
       if (update) publish(update);
@@ -590,7 +626,7 @@ export async function runCodingAgent(
       throw new Error(`${args.agent} coding agent failed: ${detail.slice(0, 8_000)}`);
     }
 
-    const parsed = args.agent === "codex"
+    const parsed = outputKind === "codex-jsonl"
       ? parseCodex(processResult.stdout)
       : args.agent === "grok"
         ? parseGrok(processResult.stdout)
@@ -609,8 +645,12 @@ export async function runCodingAgent(
       cwd,
       ...(model ? { model } : {}),
       ...(provider ? { provider } : {}),
-      isolated: ((args.agent === "hermes" || args.agent === "openrouter") && (mode === "review" || args.isolate !== false))
-        || Boolean(worktree),
+      // For OpenRouter the harness reports whether it relocated the run; only
+      // hermes has a --worktree, so codex-backed runs stay on the requested checkout.
+      isolated: harnessSpec
+        ? harnessSpec.workspace === "worktree"
+        : (args.agent === "hermes" && (mode === "review" || args.isolate !== false)) || Boolean(worktree),
+      ...(harnessSpec ? { harness: harnessSpec.harness } : {}),
       answer: parsed.answer,
       ...(visibility !== "final" && parsed.trace.length ? { trace: parsed.trace } : {}),
       ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),

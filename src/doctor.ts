@@ -12,6 +12,7 @@ import { access } from "node:fs/promises";
 
 import "./drivers/register.js"; // side-effect: registers the built-in drivers
 import { preflightCodingAgent, type PreflightDeps } from "./coding-agents/preflight.js";
+import { resolveOpenRouterHarness } from "./coding-agents/openrouter-harness.js";
 import { getDriver } from "./registry.js";
 
 export interface DoctorDeps {
@@ -196,8 +197,7 @@ async function checkDaemon(deps: DoctorDeps): Promise<CheckResult> {
 const CODING_AGENTS = ["codex", "grok", "hermes", "openrouter", "gemini", "claude"] as const;
 
 function agentCommand(agent: string, env: Record<string, string | undefined>): string {
-  const key = agent === "openrouter" ? "HERMES_CLI" : `${agent.toUpperCase()}_CLI`;
-  return env[key]?.trim() || (agent === "openrouter" ? "hermes" : agent);
+  return env[`${agent.toUpperCase()}_CLI`]?.trim() || agent;
 }
 
 /**
@@ -225,6 +225,32 @@ export async function checkCodingAgents(deps: DoctorDeps): Promise<CheckResult[]
   const out: CheckResult[] = [];
   for (const agent of agents) {
     if (!CODING_AGENTS.includes(agent as typeof CODING_AGENTS[number])) continue;
+    // `openrouter` is one public agent name over several local CLIs: probe only
+    // the selected harness, and say which one, so the row points at the binary
+    // and the *_CLI override that actually matter.
+    if (agent === "openrouter") {
+      let harness: "hermes" | "codex";
+      try {
+        harness = resolveOpenRouterHarness(deps.env as NodeJS.ProcessEnv);
+      } catch (e) {
+        out.push({
+          name: "coding:openrouter",
+          ok: false,
+          detail: e instanceof Error ? e.message : String(e),
+          critical: false,
+        });
+        continue;
+      }
+      const cmd = agentCommand(harness, deps.env);
+      const pf = await preflightCodingAgent("openrouter", cmd, pfDeps(deps.env), { openRouterHarness: harness });
+      out.push({
+        name: `coding:openrouter/${harness}`,
+        ok: pf.ok ? true : (configured ? false : null),
+        detail: pf.ok ? `ready (${cmd})` : (pf.reason ?? "not configured"),
+        critical: false,
+      });
+      continue;
+    }
     const cmd = agentCommand(agent, deps.env);
     const pf = await preflightCodingAgent(agent as typeof CODING_AGENTS[number], cmd, pfDeps(deps.env));
     out.push({
