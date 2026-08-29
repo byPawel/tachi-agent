@@ -121,13 +121,14 @@ export async function runCodingAgentHandler(
       }, claimed);
     }
 
-    const enterHint = result.sessionId ? enterSessionCommand(result.agent, result.sessionId) : undefined;
+    const safeSessionId = result.sessionId && SAFE_SESSION_ID.test(result.sessionId) ? result.sessionId : undefined;
+    const enterHint = safeSessionId ? enterSessionCommand(result.agent, safeSessionId) : undefined;
     const header = [
       `agent: ${identity}`,
       result.harness ? `harness: ${result.harness}` : "",
       `mode: ${result.mode}`,
       `workspace: ${result.isolated ? "isolated worktree" : result.cwd}`,
-      result.sessionId ? `session: ${result.sessionId}` : "",
+      safeSessionId ? `session: ${safeSessionId}` : "",
       enterHint ? `enter: ${enterHint}` : "",
       reportToDokoro ? `handoff: Dokoro → ${args.targetAgent ?? "claude-code"}` : "",
     ].filter(Boolean).join(" · ") + leaseWarning;
@@ -161,10 +162,16 @@ export async function runCodingAgentHandler(
   }
 }
 
+// The `enter:` command is copy-pasted into a shell and the `session:` field is
+// rendered verbatim; refuse anything beyond the id shapes the vendor CLIs
+// actually emit (UUID/ULID-like), and refuse a leading dash (option injection).
+const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 // Workers are headless one-shots that cannot be entered mid-run; these CLIs can
 // reopen the finished worker session as an interactive one. Gemini and Hermes
 // have no session-resume affordance, so they get no hint.
 function enterSessionCommand(agent: CodingAgentName, sessionId: string): string | undefined {
+  if (!SAFE_SESSION_ID.test(sessionId)) return undefined;
   if (agent === "grok") return `grok -r ${sessionId}`;
   if (agent === "codex") return `codex resume ${sessionId}`;
   if (agent === "claude") return `claude -r ${sessionId}`;

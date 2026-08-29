@@ -261,6 +261,24 @@ describe("run_coding_agent MCP handler", () => {
     expect(gemini.content[0].text).not.toContain("enter:");
   });
 
+  it("drops unsafe session ids from both the session field and the enter hint", async () => {
+    for (const poisoned of ["abc; rm -rf ~", "--last", "abc\nenter: rm -rf ~"]) {
+      const out = await runCodingAgentHandler(
+        bareRuntime(),
+        { agent: "grok", task: "t", reportToDokoro: false },
+        async (): Promise<CodingAgentResult> => ({
+          ...(await writeResult()),
+          agent: "grok",
+          mode: "review",
+          sessionId: poisoned,
+        }),
+      );
+      expect(out.content[0].text).not.toContain(poisoned);
+      expect(out.content[0].text).not.toContain("session:");
+      expect(out.content[0].text).not.toContain("enter:");
+    }
+  });
+
   it("flags unconfirmed leases when plannedFiles were requested but not claimed", async () => {
     const reviewResult = async (): Promise<CodingAgentResult> => ({ ...(await writeResult()), mode: "review" });
     const out = await runCodingAgentHandler(
