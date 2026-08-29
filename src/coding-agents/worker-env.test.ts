@@ -46,4 +46,19 @@ describe("buildWorkerEnv", () => {
     buildWorkerEnv("codex", base);
     expect(base).toEqual(snapshot);
   });
+
+  it("stamps TACHI_CODING_DEPTH=1 for every agent", () => {
+    for (const agent of ["codex", "grok", "hermes", "openrouter"] as const) {
+      expect(buildWorkerEnv(agent, base).TACHI_CODING_DEPTH).toBe("1");
+    }
+  });
+
+  it("overrides an inherited TACHI_CODING_DEPTH even when allowlisted", () => {
+    const env = buildWorkerEnv("codex", {
+      ...base,
+      TACHI_CODING_DEPTH: "0",
+      TACHI_WORKER_ENV_ALLOW: "TACHI_CODING_DEPTH",
+    });
+    expect(env.TACHI_CODING_DEPTH).toBe("1");
+  });
 });

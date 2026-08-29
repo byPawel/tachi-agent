@@ -40,5 +40,10 @@ export function buildWorkerEnv(
     const v = baseEnv[key];
     if (typeof v === "string" && v !== "") out[key] = v;
   }
+  // Recursion marker: the allowlist strips Claude Code's own CLAUDECODE
+  // nested-launch brake, so this stamp replaces it — the MCP handler refuses
+  // to spawn workers when its own env already carries it. Set after the copy
+  // loop so no inherited/allowlisted value can override it.
+  out.TACHI_CODING_DEPTH = "1";
   return out;
 }
