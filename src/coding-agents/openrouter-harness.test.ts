@@ -92,8 +92,72 @@ describe("hermes OpenRouter harness", () => {
 });
 
 describe("codex OpenRouter harness", () => {
-  it("is not implemented yet", () => {
-    expect(() => buildOpenRouterHarnessCommand("codex", argsFor(), {}))
-      .toThrow(/codex OpenRouter harness is not implemented/i);
+  const codexEnv = {
+    PATH: "/bin",
+    CODEX_CLI: "/usr/local/bin/codex",
+    OPENROUTER_API_KEY: "secret-value",
+  } as NodeJS.ProcessEnv;
+
+  it("drives codex against OpenRouter without leaking the key into argv", () => {
+    const built = buildOpenRouterHarnessCommand(
+      "codex",
+      argsFor({ task: "review src", model: "z-ai/glm-5.3-flash", mode: "review", isolate: true }),
+      codexEnv,
+    );
+    expect(built.harness).toBe("codex");
+    expect(built.outputKind).toBe("codex-jsonl");
+    // Codex sandboxes in place; it has no worktree flag of its own.
+    expect(built.workspace).toBe("requested");
+    expect(built.command.command).toBe("/usr/local/bin/codex");
+    expect(built.command.cwd).toBe("/repo");
+    expect(built.command.args).toEqual(expect.arrayContaining([
+      "exec", "--ephemeral", "--json",
+      "--sandbox", "read-only",
+      "-C", "/repo",
+      "-m", "z-ai/glm-5.3-flash",
+    ]));
+    expect(built.command.args.slice(-2)).toEqual(["--", "review src"]);
+    // Auth travels in the env only — never argv, logs, or config files.
+    expect(built.command.args.join(" ")).not.toContain("secret-value");
+    expect(built.command.env.OPENROUTER_API_KEY).toBe("secret-value");
+  });
+
+  it("points codex at the OpenRouter provider via -c overrides", () => {
+    const built = buildOpenRouterHarnessCommand("codex", argsFor(), codexEnv);
+    expect(built.command.args).toEqual(expect.arrayContaining([
+      "-c", 'model_provider="openrouter"',
+      "-c", 'model_providers.openrouter.name="openrouter"',
+      "-c", 'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+      "-c", 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+    ]));
+  });
+
+  it("quotes a custom OPENROUTER_BASE_URL into the config override", () => {
+    const built = buildOpenRouterHarnessCommand("codex", argsFor(), {
+      ...codexEnv,
+      OPENROUTER_BASE_URL: " https://gateway.internal/v1 ",
+    });
+    expect(built.command.args).toContain('model_providers.openrouter.base_url="https://gateway.internal/v1"');
+    expect(built.command.env.OPENROUTER_BASE_URL).toBe(" https://gateway.internal/v1 ");
+  });
+
+  it("uses the workspace-write sandbox only in write mode", () => {
+    const write = buildOpenRouterHarnessCommand("codex", argsFor({ mode: "write" }), codexEnv);
+    expect(write.command.args).toEqual(expect.arrayContaining(["--sandbox", "workspace-write"]));
+    expect(write.command.args).not.toContain("read-only");
+    const review = buildOpenRouterHarnessCommand("codex", argsFor({ mode: "review" }), codexEnv);
+    expect(review.command.args).toEqual(expect.arrayContaining(["--sandbox", "read-only"]));
+    expect(review.command.args).not.toContain("workspace-write");
+  });
+
+  it("emits no hermes flags", () => {
+    const built = buildOpenRouterHarnessCommand("codex", argsFor({ mode: "write", isolate: true }), codexEnv);
+    for (const flag of ["--query", "--worktree", "--oneshot", "--provider", "--yolo", "--toolsets"]) {
+      expect(built.command.args).not.toContain(flag);
+    }
+  });
+
+  it("falls back to the bare codex binary with no override", () => {
+    expect(buildOpenRouterHarnessCommand("codex", argsFor(), {}).command.command).toBe("codex");
   });
 });

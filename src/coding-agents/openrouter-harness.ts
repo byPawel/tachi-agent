@@ -36,6 +36,8 @@ export interface OpenRouterHarnessCommand {
   command: CodingAgentCommand;
 }
 
+const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
 /** Pick the harness from env; unset means hermes, unknown values fail closed. */
 export function resolveOpenRouterHarness(env: NodeJS.ProcessEnv = process.env): OpenRouterHarnessName {
   const raw = env.TACHI_OPENROUTER_HARNESS?.trim();
@@ -77,12 +79,45 @@ function buildHermesCommand(args: OpenRouterHarnessArgs, env: NodeJS.ProcessEnv)
   };
 }
 
+function buildCodexCommand(args: OpenRouterHarnessArgs, env: NodeJS.ProcessEnv): OpenRouterHarnessCommand {
+  const baseUrl = env.OPENROUTER_BASE_URL?.trim() || DEFAULT_OPENROUTER_BASE_URL;
+  // `env_key` names the variable codex reads at runtime — the key itself stays
+  // in the sanitized worker env and never becomes an argv value.
+  const argv = [
+    "exec",
+    "--ephemeral",
+    "--json",
+    "--color", "never",
+    "--sandbox", args.mode === "write" ? "workspace-write" : "read-only",
+    "-C", args.cwd,
+    "-c", 'model_provider="openrouter"',
+    "-c", 'model_providers.openrouter.name="openrouter"',
+    "-c", `model_providers.openrouter.base_url=${JSON.stringify(baseUrl)}`,
+    "-c", 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+    "-m", args.model,
+    // End of options: the task can never be re-read as a flag.
+    "--", args.task,
+  ];
+  return {
+    harness: "codex",
+    outputKind: "codex-jsonl",
+    // Codex has no worktree flag; its sandbox constrains the requested checkout
+    // in place, so `isolate` cannot be honored by relocating the run.
+    workspace: "requested",
+    command: {
+      command: env.CODEX_CLI?.trim() || "codex",
+      args: argv,
+      cwd: args.cwd,
+      env: buildWorkerEnv("openrouter", env),
+    },
+  };
+}
+
 /** Build the argv for the selected harness. Shell-free: task/model stay values. */
 export function buildOpenRouterHarnessCommand(
   harness: OpenRouterHarnessName,
   args: OpenRouterHarnessArgs,
   env: NodeJS.ProcessEnv = process.env,
 ): OpenRouterHarnessCommand {
-  if (harness === "codex") throw new Error("codex OpenRouter harness is not implemented");
-  return buildHermesCommand(args, env);
+  return harness === "codex" ? buildCodexCommand(args, env) : buildHermesCommand(args, env);
 }

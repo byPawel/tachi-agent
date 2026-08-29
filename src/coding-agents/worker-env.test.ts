@@ -66,6 +66,31 @@ describe("buildWorkerEnv", () => {
     expect(env.XAI_API_KEY).toBeUndefined();
   });
 
+  it("forwards every OpenRouter harness knob but no rival provider credentials", () => {
+    const env = buildWorkerEnv("openrouter", {
+      ...base,
+      ANTHROPIC_API_KEY: "sk-anthropic",
+      CODEX_CLI: "/usr/local/bin/codex",
+      CODEX_HOME: "/home/dev/.codex",
+      HERMES_CLI: "/opt/bin/hermes",
+      OPENROUTER_BASE_URL: "https://gateway.internal/v1",
+      TACHI_OPENROUTER_HARNESS: "codex",
+    });
+    // The codex harness needs its binary/home and the endpoint override.
+    expect(env.CODEX_CLI).toBe("/usr/local/bin/codex");
+    expect(env.CODEX_HOME).toBe("/home/dev/.codex");
+    expect(env.HERMES_CLI).toBe("/opt/bin/hermes");
+    expect(env.OPENROUTER_BASE_URL).toBe("https://gateway.internal/v1");
+    expect(env.TACHI_OPENROUTER_HARNESS).toBe("codex");
+    // Routing through OpenRouter must never hand the worker first-party keys.
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.CODEX_API_KEY).toBeUndefined();
+    expect(env.GATEWAY_TOKENS).toBeUndefined();
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+  });
+
   it("honors TACHI_WORKER_ENV_ALLOW extra allowlist (comma-separated)", () => {
     const env = buildWorkerEnv("codex", { ...base, TACHI_WORKER_ENV_ALLOW: "DATABASE_URL,FOO", FOO: "bar" });
     expect(env.DATABASE_URL).toBe("postgres://nope");

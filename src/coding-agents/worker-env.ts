@@ -21,7 +21,15 @@ const AGENT_ALLOW: Record<WorkerAgentName, string[]> = {
   codex: ["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_HOME"],
   grok: ["XAI_API_KEY", "GROK_API_KEY", "GROK_HOME"],
   hermes: ["HERMES_CLI", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TACHI_OPENROUTER_CODING_MODEL", "OPENROUTER_MODEL"],
-  openrouter: ["HERMES_CLI", "OPENROUTER_API_KEY", "TACHI_OPENROUTER_CODING_MODEL", "OPENROUTER_MODEL"],
+  // The `openrouter` agent is one public name over a pluggable local harness
+  // (hermes or codex), so it needs both CLIs' locator vars — but still only the
+  // OpenRouter credential: routing through OpenRouter never justifies handing a
+  // worker a first-party OpenAI/Anthropic key.
+  openrouter: [
+    "HERMES_CLI", "CODEX_CLI", "CODEX_HOME", "OPENROUTER_API_KEY",
+    "TACHI_OPENROUTER_CODING_MODEL", "OPENROUTER_MODEL",
+    "TACHI_OPENROUTER_HARNESS", "OPENROUTER_BASE_URL",
+  ],
   gemini: [
     "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
     "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
