@@ -191,9 +191,11 @@ describe("run_coding_agent MCP handler", () => {
 
   it("keeps the public tool contract: six agents, no harness input", () => {
     const schemas: Record<string, unknown>[] = [];
+    const descriptions: string[] = [];
     const server = {
-      registerTool: (_name: string, config: { inputSchema: Record<string, unknown> }) => {
+      registerTool: (_name: string, config: { inputSchema: Record<string, unknown>; description: string }) => {
         schemas.push(config.inputSchema);
+        descriptions.push(config.description);
       },
     } as any;
     registerCodingAgentTool(server, { host: {}, memory: undefined } as any);
@@ -201,8 +203,15 @@ describe("run_coding_agent MCP handler", () => {
     expect(schemas).toHaveLength(1);
     const schema = schemas[0];
     expect(Object.keys(schema)).not.toContain("harness");
-    expect((schema.agent as z.ZodEnum<[string, ...string[]]>).options)
+    // NOTE: the old `as z.ZodEnum<[string, ...string[]]>` cast is TS2344 under
+    // the installed Zod 4 (`npm run typecheck` fails today) — replace it, don't keep it.
+    expect((schema.agent as unknown as { options: string[] }).options)
       .toEqual(["codex", "grok", "hermes", "openrouter", "gemini", "claude"]);
+    // The bound that IS global: nested tachi workers are refused.
+    expect(descriptions[0]).toContain("nested tachi workers are refused");
+    // The bound that is grok-only must be scoped, not claimed globally.
+    expect(descriptions[0]).toContain("grok additionally runs with subagents disabled");
+    expect(descriptions[0]).not.toMatch(/worker: no subagents/);
   });
 
   it("prints an enter-session command for agents whose CLI can resume the worker session", async () => {

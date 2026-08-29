@@ -178,7 +178,8 @@ export function registerCodingAgentTool(server: McpServer, runtime: AgentRuntime
       title: "Run external coding agent",
       description:
         "Run Codex CLI, Grok CLI, Gemini CLI, headless Claude Code, full Hermes Agent, or an OpenRouter " +
-        "model as a bounded coding worker: no subagents, review mode is the default, write mode is env-gated. " +
+        "model as a bounded coding worker: review mode is the default, write mode is env-gated, nested tachi " +
+        "workers are refused (recursion guard), and grok additionally runs with subagents disabled. " +
         "Returns the result directly to the caller and, by default, records a directed Dokoro handoff. " +
         "Use plannedFiles from a Superpowers task to acquire advisory leases before any edits. " +
         "Review mode is read-only for Codex/Grok/Claude and worktree-isolated for Hermes/Gemini; the " +
