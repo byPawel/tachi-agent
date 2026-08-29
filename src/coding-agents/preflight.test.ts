@@ -46,4 +46,24 @@ describe("preflightCodingAgent", () => {
     expect((await preflightCodingAgent("openrouter", "hermes", deps())).ok).toBe(false);
     expect((await preflightCodingAgent("openrouter", "hermes", deps({ env: { OPENROUTER_API_KEY: "or" } }))).ok).toBe(true);
   });
+
+  it("gemini fails closed without creds and names the install path", async () => {
+    const r = await preflightCodingAgent("gemini", "gemini", deps());
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/GEMINI_API_KEY/);
+    expect(r.reason).toMatch(/@google\/gemini-cli/);
+  });
+
+  it("gemini passes with any Google credential source", async () => {
+    expect((await preflightCodingAgent("gemini", "gemini", deps({ env: { GEMINI_API_KEY: "g" } }))).ok).toBe(true);
+    expect((await preflightCodingAgent("gemini", "gemini", deps({ env: { GOOGLE_API_KEY: "g" } }))).ok).toBe(true);
+    expect((await preflightCodingAgent("gemini", "gemini", deps({ env: { GOOGLE_APPLICATION_CREDENTIALS: "/adc.json" } }))).ok).toBe(true);
+  });
+
+  it("gemini passes with a cached OAuth login", async () => {
+    const r = await preflightCodingAgent("gemini", "gemini", deps({
+      fileExists: async (p) => p.endsWith(".gemini/oauth_creds.json"),
+    }));
+    expect(r.ok).toBe(true);
+  });
 });

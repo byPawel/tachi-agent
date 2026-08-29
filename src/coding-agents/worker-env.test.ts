@@ -1,6 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { buildWorkerEnv } from "./worker-env.js";
 
+describe("gemini worker env", () => {
+  it("forwards Google credential keys and strips unrelated secrets", () => {
+    const env = buildWorkerEnv("gemini", {
+      PATH: "/bin",
+      GEMINI_API_KEY: "g",
+      GOOGLE_CLOUD_PROJECT: "proj",
+      OPENROUTER_API_KEY: "leak-me-not",
+    });
+    expect(env.GEMINI_API_KEY).toBe("g");
+    expect(env.GOOGLE_CLOUD_PROJECT).toBe("proj");
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+  });
+});
+
 const base = {
   PATH: "/usr/bin", HOME: "/home/dev", TERM: "xterm",
   OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key",

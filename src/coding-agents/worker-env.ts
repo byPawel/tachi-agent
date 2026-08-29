@@ -6,7 +6,7 @@
  * needs. Extend per-machine with TACHI_WORKER_ENV_ALLOW when a specific worker
  * legitimately needs another variable.
  */
-export type WorkerAgentName = "codex" | "grok" | "hermes" | "openrouter";
+export type WorkerAgentName = "codex" | "grok" | "hermes" | "openrouter" | "gemini";
 
 /** OS/runtime basics every CLI needs to function. Never secrets. */
 const BASE_ALLOW = [
@@ -22,6 +22,10 @@ const AGENT_ALLOW: Record<WorkerAgentName, string[]> = {
   grok: ["XAI_API_KEY", "GROK_API_KEY", "GROK_HOME"],
   hermes: ["HERMES_CLI", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TACHI_OPENROUTER_CODING_MODEL", "OPENROUTER_MODEL"],
   openrouter: ["HERMES_CLI", "OPENROUTER_API_KEY", "TACHI_OPENROUTER_CODING_MODEL", "OPENROUTER_MODEL"],
+  gemini: [
+    "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+  ],
 };
 
 function extraAllow(baseEnv: NodeJS.ProcessEnv): string[] {

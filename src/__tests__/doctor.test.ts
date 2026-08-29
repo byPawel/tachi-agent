@@ -343,6 +343,17 @@ describe("doctor: coding agent checks", () => {
     expect(codex?.ok).toBe(false);
     expect(codex?.critical).toBe(false); // informational, never blocks the CLI
   });
+
+  it("probes gemini and reports the missing binary or credential actionably", async () => {
+    const results = await checkCodingAgents(
+      makeDeps({ env: { TACHI_CODING_AGENTS: "gemini" } }),
+    );
+    const gemini = results.find((r) => r.name === "coding:gemini");
+    expect(gemini).toBeDefined();
+    expect(gemini?.ok).toBe(false); // not installed on this machine
+    expect(gemini?.detail).toMatch(/not found on PATH|GEMINI_API_KEY/);
+    expect(gemini?.critical).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
