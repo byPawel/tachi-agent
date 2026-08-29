@@ -47,8 +47,14 @@ const RUNNER_PATH = RUNNER_OVERRIDE ? path.resolve(RUNNER_OVERRIDE) : DIST_RUNNE
 /** Order matters: the incumbent runs first so a shared outage is obvious. */
 const HARNESSES = ["hermes", "codex"];
 
-/** The only path a correct write run may touch. */
-const EXPECTED_WRITE_PATHS = ["src/sum.js"];
+/**
+ * The only paths a correct write run may touch. The test file is allowed —
+ * a harness that reads or adjusts the test while fixing the bug is not
+ * littering — but `src/sum.js` must be among them: a run that changed nothing,
+ * or only the test, did not fix the planted bug.
+ */
+const EXPECTED_WRITE_PATHS = ["src/sum.js", "test/sum.test.js"];
+const REQUIRED_WRITE_PATH = "src/sum.js";
 
 const WRITE_TASK = "Fix the bug in src/sum.js so all tests pass. Run the tests to confirm.";
 const REVIEW_TASK =
@@ -167,21 +173,32 @@ async function fileReadable(target) {
 // fixture checkouts
 // ---------------------------------------------------------------------------
 
-/** Fresh throwaway git checkout of the fixture. Caller must always dispose it. */
+/**
+ * Fresh throwaway git checkout of the fixture. Ownership transfers to the caller
+ * only on success: every failure path in here removes the directory before
+ * rethrowing, so a throw after `mkdtemp` cannot leak a temp dir the caller's
+ * `finally` never learned about.
+ */
 async function createCheckout(label) {
-  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), `tachi-eval-${label}-`)));
-  await cp(FIXTURE_DIR, dir, { recursive: true });
-  // A hermes `--worktree` run needs a real repo with at least one commit; the
-  // diff/manifest checks need a baseline too. Identity and signing are pinned
-  // per-command so a developer's global git config cannot block the commit.
-  const git = (args) => exec("git", ["-c", "user.name=tachi-eval", "-c", "user.email=eval@tachi.local", "-c", "commit.gpgsign=false", ...args], { cwd: dir });
-  await git(["init", "-q"]);
-  await git(["add", "-A"]);
-  const commit = await git(["commit", "-q", "-m", "baseline: failing sum fixture", "--no-gpg-sign"]);
-  if (commit.code !== 0) {
-    throw new Error(`fixture baseline commit failed: ${redact(commit.stderr || commit.stdout)}`);
+  const dir = await mkdtemp(path.join(os.tmpdir(), `tachi-eval-${label}-`));
+  try {
+    const resolved = await realpath(dir);
+    await cp(FIXTURE_DIR, resolved, { recursive: true });
+    // A hermes `--worktree` run needs a real repo with at least one commit; the
+    // diff/manifest checks need a baseline too. Identity and signing are pinned
+    // per-command so a developer's global git config cannot block the commit.
+    const git = (args) => exec("git", ["-c", "user.name=tachi-eval", "-c", "user.email=eval@tachi.local", "-c", "commit.gpgsign=false", ...args], { cwd: resolved });
+    await git(["init", "-q"]);
+    await git(["add", "-A"]);
+    const commit = await git(["commit", "-q", "-m", "baseline: failing sum fixture", "--no-gpg-sign"]);
+    if (commit.code !== 0) {
+      throw new Error(`fixture baseline commit failed: ${redact(commit.stderr || commit.stdout)}`);
+    }
+    return resolved;
+  } catch (error) {
+    await disposeCheckout(dir);
+    throw error;
   }
-  return dir;
 }
 
 async function disposeCheckout(dir) {
@@ -303,7 +320,7 @@ async function writePhase(runCodingAgent, harness) {
       traceKinds: traceKindsOf(result),
       changedPaths: changed,
       untrackedPaths: untracked,
-      expectedPathsOnly: touched.length > 0 && touched.every((p) => EXPECTED_WRITE_PATHS.includes(p)),
+      expectedPathsOnly: touched.includes(REQUIRED_WRITE_PATH) && touched.every((p) => EXPECTED_WRITE_PATHS.includes(p)),
       isolated: result?.isolated ?? null,
       ...(RUNNER_OVERRIDE ? { dryRun: true } : {}),
       ...(error ? { error } : {}),
@@ -362,6 +379,13 @@ async function reviewPhase(runCodingAgent, harness) {
 // rubric
 // ---------------------------------------------------------------------------
 
+/**
+ * The four task criteria both harnesses must clear for the comparison to mean
+ * anything. `structuredTrace` is deliberately not one of them: it is the
+ * tie-breaker codex alone has to win, not a bar hermes is expected to clear.
+ */
+const HARD_GATES = ["writeSucceeded", "testsPassed", "expectedPathsOnly", "checkoutUnchanged"];
+
 /** Criteria are documented in docs/openrouter-harness-evaluation.md. */
 function scoreHarness(write, review) {
   const criteria = {
@@ -372,7 +396,13 @@ function scoreHarness(write, review) {
     structuredTrace: write.traceKinds.length > 0 || review.traceKinds.length > 0,
   };
   const met = Object.values(criteria).filter(Boolean).length;
-  return { criteria, met, total: Object.keys(criteria).length, allMet: met === Object.keys(criteria).length };
+  return {
+    criteria,
+    met,
+    total: Object.keys(criteria).length,
+    allMet: met === Object.keys(criteria).length,
+    hardGatesMet: HARD_GATES.every((gate) => criteria[gate] === true),
+  };
 }
 
 function buildSummary(phases) {
@@ -391,8 +421,29 @@ function buildSummary(phases) {
     const review = phases.find((p) => p.harness === h && p.phase === "review");
     return write.exitStatus === "ok" && review.exitStatus === "ok";
   });
-  // Codex must earn the default outright; anything less and hermes keeps it.
-  const promoteCodex = bothCompleted && scores.codex.allMet;
+  // Codex must earn the default outright, and only against a hermes run that
+  // itself cleared the task: if the incumbent failed the hard gates the two runs
+  // are not comparable (a broken fixture, a dead network), and a codex "win"
+  // there measures the environment, not the harness. Anything short of
+  // complete + hermes-clean + codex-clean + codex-traced leaves hermes in place.
+  //
+  // `bothCompleted` is checked first and is not redundant with the hard gates: a
+  // review run that throws never touches the checkout, so `checkoutUnchanged`
+  // comes back true and a harness whose review crashed could otherwise clear
+  // every gate on the strength of having done nothing.
+  const promoteCodex = bothCompleted
+    && scores.hermes.hardGatesMet
+    && scores.codex.hardGatesMet
+    && scores.codex.criteria.structuredTrace;
+  const reason = promoteCodex
+    ? null
+    : !bothCompleted
+      ? "a harness phase did not complete — results not comparable"
+      : !scores.hermes.hardGatesMet
+        ? "hermes failed hard gates — environment not comparable"
+        : !scores.codex.hardGatesMet
+          ? "codex failed hard gates"
+          : "codex emitted no trace events";
   const ranking = [...HARNESSES].sort((a, b) => scores[b].met - scores[a].met || HARNESSES.indexOf(a) - HARNESSES.indexOf(b));
   const integrityViolations = phases.filter((p) => p.phase === "review" && p.checkoutUnchanged === false).map((p) => p.harness);
   return {
@@ -407,8 +458,9 @@ function buildSummary(phases) {
     integrityViolations,
     recommendedDefault: promoteCodex ? "codex" : "hermes",
     rationale: promoteCodex
-      ? "codex met every rubric criterion and both harnesses completed — promote codex to the default openrouter harness"
-      : "codex did not meet every rubric criterion (or a harness did not complete) — hermes stays the default openrouter harness",
+      ? "both harnesses completed every phase and cleared every hard gate, and codex additionally emitted structured trace events — promote codex to the default openrouter harness"
+      : `hermes stays the default openrouter harness — ${reason}`,
+    ...(reason ? { reason } : {}),
     rubric: "docs/openrouter-harness-evaluation.md",
   };
 }

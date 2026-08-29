@@ -51,7 +51,9 @@ worktree and every post-run measurement would read an untouched checkout.
 `changedPaths` is `git diff --name-only HEAD`; `untrackedPaths` is
 `git ls-files --others --exclude-standard`, so a harness that litters state files
 into the checkout is visible. `expectedPathsOnly` is true only when the union of
-the two is non-empty and contained in `["src/sum.js"]`.
+the two includes `src/sum.js` (the fix has to actually land) and is contained in
+`["src/sum.js", "test/sum.test.js"]` — a model that legitimately extends the
+tests does not fail the gate, anything else touched or added does.
 
 **review line** — `harness`, `phase`, `durationMs`, `exitStatus`, `answerLength`,
 `traceKinds`, `checkoutUnchanged`, `mutatedPaths`, `isolated`, and `error`.
@@ -64,19 +66,28 @@ every string that reaches stdout, and error text is flattened and truncated to
 
 ## Rubric
 
-**Codex becomes the default only when both harnesses complete and codex has all
-five of:**
+**Codex becomes the default only when every phase of both harnesses completed,
+BOTH harnesses cleared all four hard gates, and codex additionally surfaced
+structured trace:**
 
-| # | Criterion | Source field |
-|---|---|---|
-| 1 | `writeSucceeded` — the write run returned without throwing | write `exitStatus === "ok"` |
-| 2 | `testsPassed` — `node --test` is green in the checkout afterwards | write `testsPassed` |
-| 3 | `expectedPathsOnly` — nothing outside `src/sum.js` was touched or added | write `expectedPathsOnly` |
-| 4 | `checkoutUnchanged` — the review run left the checkout byte-identical | review `checkoutUnchanged` |
-| 5 | `structuredTrace` — at least one structured trace event was surfaced | non-empty `traceKinds` in either phase |
+| # | Criterion | Applies to | Source field |
+|---|---|---|---|
+| 1 | `writeSucceeded` — the write run returned without throwing | both (hard gate) | write `exitStatus === "ok"` |
+| 2 | `testsPassed` — `node --test` is green in the checkout afterwards | both (hard gate) | write `testsPassed` |
+| 3 | `expectedPathsOnly` — `src/sum.js` changed, nothing outside `src/sum.js` + `test/sum.test.js` touched or added | both (hard gate) | write `expectedPathsOnly` |
+| 4 | `checkoutUnchanged` — the review run left the checkout byte-identical | both (hard gate) | review `checkoutUnchanged` |
+| 5 | `structuredTrace` — at least one structured trace event was surfaced | codex only | non-empty `traceKinds` in either phase |
 
-**Otherwise hermes stays the default.** A tie, a partial pass, a harness that did
-not complete, or a codex win on speed alone all leave hermes in place. Speed and
+Hermes clearing the hard gates is a promotion condition, not a courtesy: if the
+incumbent failed them, the environment (fixture, network, credentials) is suspect
+and a codex "win" measures the environment, not the harness. Completion is
+checked first and separately — a review run that throws never touches the
+checkout, so `checkoutUnchanged` would come back true for a harness whose review
+crashed.
+
+**Otherwise hermes stays the default**, and the summary names the reason
+(incomplete phase / hermes gates / codex gates / no trace). A tie, a partial
+pass, or a codex win on speed alone all leave hermes in place. Speed and
 `answerLength` are reported for context; they never decide the outcome.
 
 Criterion 5 is the substantive difference between the two harnesses today: the
