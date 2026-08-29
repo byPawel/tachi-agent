@@ -122,7 +122,7 @@ export async function runCodingAgentHandler(
     }
 
     const safeSessionId = result.sessionId && SAFE_SESSION_ID.test(result.sessionId) ? result.sessionId : undefined;
-    const enterHint = safeSessionId ? enterSessionCommand(result.agent, safeSessionId) : undefined;
+    const enterHint = safeSessionId ? enterSessionCommand(result.agent, safeSessionId, result.harness) : undefined;
     const header = [
       `agent: ${identity}`,
       result.harness ? `harness: ${result.harness}` : "",
@@ -170,10 +170,14 @@ const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 // Workers are headless one-shots that cannot be entered mid-run; these CLIs can
 // reopen the finished worker session as an interactive one. Gemini and Hermes
 // have no session-resume affordance, so they get no hint.
-function enterSessionCommand(agent: CodingAgentName, sessionId: string): string | undefined {
+function enterSessionCommand(
+  agent: CodingAgentName,
+  sessionId: string,
+  harness?: CodingAgentResult["harness"],
+): string | undefined {
   if (!SAFE_SESSION_ID.test(sessionId)) return undefined;
   if (agent === "grok") return `grok -r ${sessionId}`;
-  if (agent === "codex") return `codex resume ${sessionId}`;
+  if (agent === "codex" || (agent === "openrouter" && harness === "codex")) return `codex resume ${sessionId}`;
   if (agent === "claude") return `claude -r ${sessionId}`;
   return undefined;
 }

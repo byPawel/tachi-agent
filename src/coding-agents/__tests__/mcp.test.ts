@@ -288,4 +288,28 @@ describe("run_coding_agent MCP handler", () => {
     );
     expect(out.content[0].text).toMatch(/leases unconfirmed/i);
   });
+
+  it("prints a codex resume hint for openrouter runs on the codex harness only", async () => {
+    const orResult = (harness: "codex" | "hermes") => async (): Promise<CodingAgentResult> => ({
+      ...(await writeResult()),
+      agent: "openrouter",
+      provider: "openrouter",
+      model: "z-ai/glm-5.3-flash",
+      harness,
+      mode: "review",
+      sessionId: "01a04e0e-18d3-7d02-94bb-4d67cd6febb0",
+    });
+    const codexHarness = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "t", reportToDokoro: false },
+      orResult("codex"),
+    );
+    expect(codexHarness.content[0].text).toContain("enter: codex resume 01a04e0e-18d3-7d02-94bb-4d67cd6febb0");
+    const hermesHarness = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "t", reportToDokoro: false },
+      orResult("hermes"),
+    );
+    expect(hermesHarness.content[0].text).not.toContain("enter:");
+  });
 });
