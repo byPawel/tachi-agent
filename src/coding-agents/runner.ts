@@ -6,6 +6,7 @@ import { preflightCodingAgent, type PreflightDeps } from "./preflight.js";
 import { parseGeminiJson, reviewGuard } from "./gemini-parse.js";
 import { parseClaudeEnvelope } from "./claude-parse.js";
 import { createReviewWorktree, type ReviewWorktree } from "./review-worktree.js";
+import { buildOpenRouterHarnessCommand, resolveOpenRouterHarness } from "./openrouter-harness.js";
 
 export type CodingAgentName = "codex" | "grok" | "hermes" | "openrouter" | "gemini" | "claude";
 export type CodingAgentMode = "review" | "write";
@@ -94,7 +95,7 @@ function envCommand(name: CodingAgentName): string {
   return process.env[key]?.trim() || (name === "openrouter" ? "hermes" : name);
 }
 
-function openRouterCodingModel(explicit?: string): string | undefined {
+export function openRouterCodingModel(explicit?: string): string | undefined {
   return explicit?.trim()
     || process.env.TACHI_OPENROUTER_CODING_MODEL?.trim()
     || process.env.OPENROUTER_MODEL?.trim()
@@ -178,13 +179,32 @@ export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string
     return { command: envCommand("grok"), args: argv, cwd: args.cwd, env: buildWorkerEnv("grok", process.env) };
   }
 
-  const provider = args.agent === "openrouter" ? "openrouter" : args.provider?.trim();
-  const model = args.agent === "openrouter" ? openRouterCodingModel(args.model) : args.model?.trim();
-  if (args.agent === "openrouter" && !model) {
-    throw new Error(
-      "openrouter coding agent requires an explicit model, TACHI_OPENROUTER_CODING_MODEL, or OPENROUTER_MODEL",
-    );
+  if (args.agent === "openrouter") {
+    // One public agent name, pluggable local harness. The adapter owns the argv
+    // for every harness; the leading-dash guard above still applies to all of them.
+    const orModel = openRouterCodingModel(args.model);
+    if (!orModel) {
+      throw new Error(
+        "openrouter coding agent requires an explicit model, TACHI_OPENROUTER_CODING_MODEL, or OPENROUTER_MODEL",
+      );
+    }
+    return buildOpenRouterHarnessCommand(
+      resolveOpenRouterHarness(process.env),
+      {
+        task: args.task,
+        cwd: args.cwd,
+        model: orModel,
+        mode,
+        isolate: args.isolate !== false,
+        maxTurns,
+        timeoutMs: args.timeoutMs ?? DEFAULT_CODING_TIMEOUT_MS,
+      },
+      process.env,
+    ).command;
   }
+
+  const provider = args.provider?.trim();
+  const model = args.model?.trim();
   const isolated = mode === "review" || args.isolate !== false;
   const argv = [
     "chat",
