@@ -18,3 +18,10 @@ docs/superpowers/plans/
 
 # context-inspector JSONL output (written into cwd when TACHI_CONTEXT_INSPECT is on)
 .tachi/
+
+# Claude Code local state (worktrees hold nested git checkouts; settings are per-machine)
+.claude/worktrees/
+.claude/settings.local.json
+
+# remember-plugin session buffers
+.remember/
