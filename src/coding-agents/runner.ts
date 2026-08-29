@@ -112,6 +112,11 @@ export function writeAuthorized(args: { mode?: CodingAgentMode; env?: NodeJS.Pro
 
 /** Build argv without a shell: tasks/models are values, never executable syntax. */
 export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string }): CodingAgentCommand {
+  // A leading dash would let the task masquerade as a CLI flag (option-value
+  // parsing is parser-dependent for grok/hermes; codex gets `--` too).
+  if (/^\s*-/.test(args.task)) {
+    throw new Error('coding agent task must not start with "-" — prefix it, e.g. "Task: …"');
+  }
   const mode = args.mode ?? "review";
   const maxTurns = clampInt(args.maxTurns, 40, 1, 500);
 
@@ -125,7 +130,7 @@ export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string
       "-C", args.cwd,
     ];
     if (args.model?.trim()) argv.push("-m", args.model.trim());
-    argv.push(args.task);
+    argv.push("--", args.task);
     return { command: envCommand("codex"), args: argv, cwd: args.cwd, env: buildWorkerEnv("codex", process.env) };
   }
 

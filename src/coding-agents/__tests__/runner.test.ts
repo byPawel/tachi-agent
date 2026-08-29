@@ -61,6 +61,26 @@ describe("buildCodingAgentCommand", () => {
     const spec = buildCodingAgentCommand({ agent: "openrouter", task: "x", cwd: CWD });
     expect(spec.args).toEqual(expect.arrayContaining(["--model", "deepseek/deepseek-v3.2"]));
   });
+
+  it("terminates Codex flag parsing with -- before the positional task", () => {
+    const spec = buildCodingAgentCommand({ agent: "codex", task: "review this", cwd: CWD, mode: "review" });
+    expect(spec.args.at(-2)).toBe("--");
+    expect(spec.args.at(-1)).toBe("review this");
+  });
+
+  it("rejects tasks that start with a dash for every agent", () => {
+    for (const agent of ["codex", "grok", "hermes", "openrouter"] as const) {
+      expect(() => buildCodingAgentCommand({ agent, task: "-rf /", cwd: CWD, model: "m" }))
+        .toThrow(/must not start with "-"/);
+      expect(() => buildCodingAgentCommand({ agent, task: "  --help", cwd: CWD, model: "m" }))
+        .toThrow(/must not start with "-"/);
+    }
+  });
+
+  it("accepts tasks that merely contain dashes", () => {
+    const spec = buildCodingAgentCommand({ agent: "codex", task: "Task: -rf is dangerous", cwd: CWD });
+    expect(spec.args.at(-1)).toBe("Task: -rf is dangerous");
+  });
 });
 
 describe("runCodingAgent", () => {
