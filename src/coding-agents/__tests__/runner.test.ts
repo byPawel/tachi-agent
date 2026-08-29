@@ -27,7 +27,9 @@ afterEach(() => {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.XAI_API_KEY;
   delete process.env.OPENROUTER_MODEL;
+  delete process.env.OPENROUTER_API_KEY;
   delete process.env.TACHI_OPENROUTER_CODING_MODEL;
+  delete process.env.TACHI_OPENROUTER_HARNESS;
   delete process.env.TACHI_CODING_ROOTS;
   delete process.env.TACHI_CODING_DEPTH;
 });
@@ -230,6 +232,123 @@ describe("preflight", () => {
       // executor that would fail if reached
       async () => { throw new Error("should not spawn"); },
     )).rejects.toThrow(/OPENROUTER_API_KEY|not found on PATH/i);
+  });
+});
+
+describe("openrouter harness execution", () => {
+  const codexHarness = () => {
+    process.env.TACHI_OPENROUTER_HARNESS = "codex";
+    process.env.CODEX_CLI = process.execPath;
+    process.env.OPENROUTER_API_KEY = "test-key";
+  };
+  const hermesHarness = () => {
+    process.env.HERMES_CLI = process.execPath;
+    process.env.OPENROUTER_API_KEY = "test-key";
+  };
+  const codexJsonl = [
+    JSON.stringify({ type: "thread.started", thread_id: "or-thread-1" }),
+    JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "Inspect files." } }),
+    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "review complete" } }),
+  ];
+
+  it("parses codex JSONL and reports the harness when the codex harness is selected", async () => {
+    codexHarness();
+    const executor: CommandExecutor = vi.fn(async () => ok(codexJsonl.join("\n")));
+    const result = await runCodingAgent(
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "review", cwd: CWD },
+      executor,
+    );
+    expect(result.agent).toBe("openrouter");
+    expect(result.provider).toBe("openrouter");
+    expect(result.harness).toBe("codex");
+    expect(result.model).toBe("z-ai/glm-5.3-flash");
+    expect(result.answer).toBe("review complete");
+    expect(result.sessionId).toBe("or-thread-1");
+    expect(result.trace).toEqual(expect.arrayContaining([
+      { kind: "reasoning", message: "Inspect files." },
+    ]));
+    // Codex constrains the requested checkout in place; there is no worktree.
+    expect(result.isolated).toBe(false);
+  });
+
+  it("preflights the codex binary, not hermes, when the codex harness is selected", async () => {
+    process.env.TACHI_OPENROUTER_HARNESS = "codex";
+    process.env.OPENROUTER_API_KEY = "test-key";
+    process.env.CODEX_CLI = "/definitely/not/on/path/codex";
+    await expect(runCodingAgent(
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "review", cwd: CWD },
+      async () => { throw new Error("should not spawn"); },
+    )).rejects.toThrow(/openrouter\/codex CLI "\/definitely\/not\/on\/path\/codex" not found on PATH/);
+  });
+
+  it("streams live codex progress for the codex-backed openrouter harness", async () => {
+    codexHarness();
+    const onProgress = vi.fn(async () => undefined);
+    const executor: CommandExecutor = vi.fn(async (_spec, options) => {
+      options.onStdout?.(`${codexJsonl[0]}\n${codexJsonl[1].slice(0, 20)}`);
+      options.onStdout?.(`${codexJsonl[1].slice(20)}\n${codexJsonl[2]}\n`);
+      return ok(codexJsonl.join("\n"));
+    });
+    await runCodingAgent(
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "review", cwd: CWD, visibility: "live", onProgress },
+      executor,
+    );
+    expect(onProgress).toHaveBeenCalledWith({ kind: "reasoning", message: "Inspect files." });
+  });
+
+  it("keeps plain output and worktree isolation for the default hermes harness", async () => {
+    hermesHarness();
+    const executor: CommandExecutor = vi.fn(async () => ok("review complete\n"));
+    const result = await runCodingAgent(
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "review", cwd: CWD },
+      executor,
+    );
+    expect(result.harness).toBe("hermes");
+    expect(result.answer).toBe("review complete");
+    expect(result.isolated).toBe(true);
+    expect(result.trace).toBeUndefined();
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: process.execPath,
+        args: expect.arrayContaining(["--worktree", "--provider", "openrouter"]),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("reports the hermes harness un-isolated when isolate is declined in write mode", async () => {
+    hermesHarness();
+    process.env.TACHI_CODING_ALLOW_WRITE = "1";
+    try {
+      const result = await runCodingAgent(
+        { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "fix it", cwd: CWD, mode: "write", isolate: false },
+        async () => ok("patched"),
+      );
+      expect(result.harness).toBe("hermes");
+      expect(result.isolated).toBe(false);
+    } finally {
+      delete process.env.TACHI_CODING_ALLOW_WRITE;
+    }
+  });
+
+  it("fails closed on an unrecognized harness selector", async () => {
+    process.env.TACHI_OPENROUTER_HARNESS = "bogus";
+    process.env.OPENROUTER_API_KEY = "test-key";
+    await expect(runCodingAgent(
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "review", cwd: CWD },
+      async () => { throw new Error("should not spawn"); },
+    )).rejects.toThrow(/TACHI_OPENROUTER_HARNESS/);
+  });
+
+  it("leaves the native codex agent free of harness metadata", async () => {
+    process.env.CODEX_CLI = process.execPath;
+    const result = await runCodingAgent(
+      { agent: "codex", task: "x", cwd: CWD },
+      async () => ok(codexJsonl.join("\n")),
+    );
+    expect(result.harness).toBeUndefined();
+    expect(result.provider).toBeUndefined();
+    expect(result.answer).toBe("review complete");
   });
 });
 

@@ -31,6 +31,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:openrouter-harness": "npm run build && node scripts/eval-openrouter-harness.mjs",
     "dev": "tsx src/index.ts",
     "agent": "tsc -p tsconfig.build.json && node --env-file=.env dist/cli.js",
     "repl": "tsc -p tsconfig.build.json && node --env-file=.env dist/frontends/repl.js",

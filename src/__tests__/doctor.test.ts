@@ -365,6 +365,47 @@ describe("doctor: coding agent checks", () => {
     expect(gemini?.detail).toMatch(/not found on PATH|GEMINI_API_KEY/);
     expect(gemini?.critical).toBe(false);
   });
+
+  it("names the openrouter row after the default hermes harness and probes HERMES_CLI", async () => {
+    const results = await checkCodingAgents(makeDeps({
+      env: {
+        TACHI_CODING_AGENTS: "openrouter",
+        OPENROUTER_API_KEY: "or",
+        HERMES_CLI: process.execPath,
+        CODEX_CLI: "/definitely/not/on/path/codex",
+      },
+    }));
+    const row = results.find((r) => r.name.startsWith("coding:openrouter"));
+    expect(row?.name).toBe("coding:openrouter/hermes");
+    expect(row?.ok).toBe(true);
+    expect(row?.detail).toContain(process.execPath);
+  });
+
+  it("probes CODEX_CLI when TACHI_OPENROUTER_HARNESS selects codex", async () => {
+    const results = await checkCodingAgents(makeDeps({
+      env: {
+        TACHI_CODING_AGENTS: "openrouter",
+        TACHI_OPENROUTER_HARNESS: "codex",
+        OPENROUTER_API_KEY: "or",
+        CODEX_CLI: process.execPath,
+        HERMES_CLI: "/definitely/not/on/path/hermes",
+      },
+    }));
+    const row = results.find((r) => r.name.startsWith("coding:openrouter"));
+    expect(row?.name).toBe("coding:openrouter/codex");
+    expect(row?.ok).toBe(true);
+    expect(row?.detail).toContain(process.execPath);
+  });
+
+  it("reports an unrecognized harness selector as a non-critical failure", async () => {
+    const results = await checkCodingAgents(makeDeps({
+      env: { TACHI_CODING_AGENTS: "openrouter", TACHI_OPENROUTER_HARNESS: "bogus", OPENROUTER_API_KEY: "or" },
+    }));
+    const row = results.find((r) => r.name.startsWith("coding:openrouter"));
+    expect(row?.ok).toBe(false);
+    expect(row?.critical).toBe(false);
+    expect(row?.detail).toMatch(/TACHI_OPENROUTER_HARNESS/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -379,9 +420,10 @@ describe("doctor: output and footer", () => {
     const { results, ok } = await runDoctor(deps);
     // one line per check + footer
     expect(deps.lines).toHaveLength(results.length + 1);
-    expect(deps.lines[0]).toBe("✓ node               v22.1.0");
+    // Column width = longest row name + 2; "coding:openrouter/hermes" (24) is it.
+    expect(deps.lines[0]).toBe("✓ node                      v22.1.0");
     const daemonLine = deps.lines.find((l) => l.includes("daemon"));
-    expect(daemonLine).toBe("– daemon             local mode (no TACHI_DAEMON_URL)");
+    expect(daemonLine).toBe("– daemon                    local mode (no TACHI_DAEMON_URL)");
     expect(deps.lines.at(-1)).toBe("doctor: all good");
     expect(ok).toBe(true);
   });

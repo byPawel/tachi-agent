@@ -105,6 +105,9 @@ export async function runCodingAgentHandler(
     const summary = [
       `${identity} completed a ${result.mode} coding task in ${result.cwd}.`,
       result.isolated ? "Workspace: isolated git worktree." : "Workspace: requested checkout.",
+      // `openrouter` is one agent name over several local CLIs; the handoff has
+      // to say which one ran, since their sandboxes and traces differ.
+      ...(result.harness ? [`Harness: ${result.harness}.`] : []),
       result.answer,
     ].join("\n\n");
 
@@ -119,6 +122,7 @@ export async function runCodingAgentHandler(
 
     const header = [
       `agent: ${identity}`,
+      result.harness ? `harness: ${result.harness}` : "",
       `mode: ${result.mode}`,
       `workspace: ${result.isolated ? "isolated worktree" : result.cwd}`,
       result.sessionId ? `session: ${result.sessionId}` : "",
@@ -160,12 +164,14 @@ export function registerCodingAgentTool(server: McpServer, runtime: AgentRuntime
     {
       title: "Run external coding agent",
       description:
-        "Run Codex CLI, Grok CLI, Gemini CLI, headless Claude Code, full Hermes Agent, or a Hermes-powered " +
-        "OpenRouter model as a coding worker. " +
+        "Run Codex CLI, Grok CLI, Gemini CLI, headless Claude Code, full Hermes Agent, or an OpenRouter " +
+        "model as a coding worker. " +
         "Returns the result directly to the caller and, by default, records a directed Dokoro handoff. " +
         "Use plannedFiles from a Superpowers task to acquire advisory leases before any edits. " +
-        "Review mode is read-only for Codex/Grok/Claude and worktree-isolated for Hermes/OpenRouter/Gemini; " +
-        "write mode must be explicit.",
+        "Review mode is read-only for Codex/Grok/Claude and worktree-isolated for Hermes/Gemini; the " +
+        "openrouter agent follows whichever local harness drives it (hermes by default — worktree-isolated; " +
+        "codex via TACHI_OPENROUTER_HARNESS — read-only, in place) and reports it back as `harness`. " +
+        "Write mode must be explicit.",
       inputSchema: {
         agent: z.enum(["codex", "grok", "hermes", "openrouter", "gemini", "claude"]),
         task: z.string().min(1).max(200_000),

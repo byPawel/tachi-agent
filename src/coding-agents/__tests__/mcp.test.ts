@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { runCodingAgentHandler } from "../mcp.js";
+import { z } from "zod";
+import { registerCodingAgentTool, runCodingAgentHandler } from "../mcp.js";
 import type { CodingAgentResult } from "../runner.js";
 
 describe("run_coding_agent MCP handler", () => {
@@ -134,6 +135,74 @@ describe("run_coding_agent MCP handler", () => {
     } finally {
       delete process.env.TACHI_CODING_ALLOW_WRITE;
     }
+  });
+
+  it("reports the OpenRouter harness in the header and the Dokoro handoff", async () => {
+    const callInternal = vi.fn(async () => "ok");
+    const runtime = {
+      host: { internalTools: () => coordinationTools, callInternal },
+      memory: { log: vi.fn(async () => undefined) },
+    } as any;
+    const runner = vi.fn(async (): Promise<CodingAgentResult> => ({
+      agent: "openrouter",
+      provider: "openrouter",
+      model: "z-ai/glm-5.3-flash",
+      harness: "codex",
+      mode: "review",
+      cwd: process.cwd(),
+      isolated: false,
+      answer: "review complete",
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+    }));
+
+    const out = await runCodingAgentHandler(
+      runtime,
+      { agent: "openrouter", model: "z-ai/glm-5.3-flash", task: "review", cwd: process.cwd(), targetAgent: "fable" },
+      runner,
+    );
+
+    expect(out.isError).toBeFalsy();
+    // Identity string is unchanged; the harness is an ADDITIONAL header field.
+    expect(out.content[0].text).toContain("agent: openrouter/openrouter/z-ai/glm-5.3-flash");
+    expect(out.content[0].text).toContain("harness: codex");
+    expect(callInternal).toHaveBeenCalledWith(
+      "dokoro_dokoro_handoff_write",
+      expect.objectContaining({
+        to_agent: "fable",
+        summary: expect.stringContaining("Harness: codex"),
+      }),
+      undefined,
+    );
+  });
+
+  it("omits the harness field for agents that have none", async () => {
+    const out = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "codex", task: "t", reportToDokoro: false },
+      async () => ({ ...(await writeResult()), mode: "review" }),
+    );
+    expect(out.content[0].text).not.toMatch(/harness/i);
+  });
+
+  it("keeps the public tool contract: six agents, no harness input", () => {
+    const schemas: Record<string, unknown>[] = [];
+    const server = {
+      registerTool: (_name: string, config: { inputSchema: Record<string, unknown> }) => {
+        schemas.push(config.inputSchema);
+      },
+    } as any;
+    registerCodingAgentTool(server, { host: {}, memory: undefined } as any);
+
+    expect(schemas).toHaveLength(1);
+    const schema = schemas[0];
+    expect(Object.keys(schema)).not.toContain("harness");
+    expect((schema.agent as z.ZodEnum<[string, ...string[]]>).options)
+      .toEqual(["codex", "grok", "hermes", "openrouter", "gemini", "claude"]);
   });
 
   it("flags unconfirmed leases when plannedFiles were requested but not claimed", async () => {

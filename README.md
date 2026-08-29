@@ -198,6 +198,7 @@ Workers run as real local processes, so the tool is hardened to keep an injected
 | `TACHI_CODING_ALLOW_WRITE` | `1`/`true` to permit `mode: "write"` (default: write disabled) |
 | `TACHI_CODING_MAX_CONCURRENCY` | Max concurrent workers, clamped 1–16 (default 3) |
 | `TACHI_WORKER_ENV_ALLOW` | Extra env var names to pass through to workers |
+| `TACHI_OPENROUTER_HARNESS` | Private harness behind `agent: "openrouter"`: `hermes` (default) or `codex` |
 | `TACHI_CODING_AGENTS` | Comma-separated agents for `doctor` to probe (default: all six) |
 
 The MCP server exposes `run_coding_agent`:
@@ -226,6 +227,8 @@ Codex uses `codex exec --json`, so its public JSONL events can report reasoning 
 
 The `openrouter` worker is the full Hermes Agent coding harness with an OpenRouter model selected per run. It keeps Hermes file, terminal, and skill toolsets, checkpoints destructive file operations, tags the session as a tool integration, and uses a git worktree by default. Review mode always stays isolated; pass `isolate: false` only for an explicitly authorized write task that must modify the requested checkout.
 
+`agent: "openrouter"` is the **only caller-visible choice** — it is the generic multi-provider lane: any OpenRouter model (GLM, Kimi, DeepSeek, Qwen, …) runs as a coding worker through this one stable adapter, with no per-vendor worker types.
+
 Prerequisites:
 
 ```bash
@@ -233,6 +236,13 @@ export OPENROUTER_API_KEY="..."
 export TACHI_OPENROUTER_CODING_MODEL="qwen/qwen3-coder"
 export HERMES_CLI="/absolute/path/to/hermes"   # optional when hermes is on PATH
 ```
+
+**Advanced: harness selection.** The coding harness behind the adapter is private and swappable via `TACHI_OPENROUTER_HARNESS=hermes|codex` (any other value fails closed before spawn):
+
+- `hermes` (**default**, pending live evaluation) — full Hermes Agent harness; review mode always runs in an isolated git worktree (`isolated: true`).
+- `codex` — Codex CLI pointed at OpenRouter through process-local config overrides (never touching `~/.codex/config.toml`); review mode uses Codex's `read-only` sandbox on the requested checkout (`isolated: false`), and trace/live visibility stream Codex's structured JSONL events. Auth flows only through the sanitized worker env (`OPENROUTER_API_KEY`), never argv.
+
+The result header and Dokoro handoff name the harness (`harness: codex` / `Harness: codex.`) without changing the `openrouter/<model>` identity. `doctor` probes only the selected harness (`coding:openrouter/<harness>`). Compare both live with `npm run eval:openrouter-harness` — see `docs/openrouter-harness-evaluation.md` for the rubric and billed command.
 
 Example tool arguments:
 

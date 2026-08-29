@@ -47,6 +47,40 @@ describe("preflightCodingAgent", () => {
     expect((await preflightCodingAgent("openrouter", "hermes", deps({ env: { OPENROUTER_API_KEY: "or" } }))).ok).toBe(true);
   });
 
+  it("openrouter requires OPENROUTER_API_KEY for every harness, and only that key", async () => {
+    for (const harness of ["hermes", "codex"] as const) {
+      const otherKeys = deps({ env: { OPENAI_API_KEY: "sk", CODEX_API_KEY: "sk", ANTHROPIC_API_KEY: "sk" } });
+      const missing = await preflightCodingAgent("openrouter", harness, otherKeys, { openRouterHarness: harness });
+      expect(missing.ok).toBe(false);
+      expect(missing.reason).toContain(`openrouter/${harness} has no usable credential`);
+      expect(missing.reason).toMatch(/OPENROUTER_API_KEY/);
+
+      const granted = await preflightCodingAgent(
+        "openrouter",
+        harness,
+        deps({ env: { OPENROUTER_API_KEY: "or" } }),
+        { openRouterHarness: harness },
+      );
+      expect(granted.ok).toBe(true);
+    }
+  });
+
+  it("names the openrouter harness and the binary it actually probed", async () => {
+    const missingBinary = deps({ hasBinary: async () => false, env: { OPENROUTER_API_KEY: "or" } });
+    const codex = await preflightCodingAgent("openrouter", "codex", missingBinary, { openRouterHarness: "codex" });
+    expect(codex.ok).toBe(false);
+    expect(codex.reason).toContain('openrouter/codex CLI "codex" not found on PATH');
+
+    const hermes = await preflightCodingAgent("openrouter", "hermes", missingBinary, { openRouterHarness: "hermes" });
+    expect(hermes.ok).toBe(false);
+    expect(hermes.reason).toContain('openrouter/hermes CLI "hermes" not found on PATH');
+  });
+
+  it("falls back to the bare agent name when no harness context is supplied", async () => {
+    const r = await preflightCodingAgent("openrouter", "hermes", deps({ hasBinary: async () => false }));
+    expect(r.reason).toContain('openrouter CLI "hermes" not found on PATH');
+  });
+
   it("gemini fails closed without creds and names the install path", async () => {
     const r = await preflightCodingAgent("gemini", "gemini", deps());
     expect(r.ok).toBe(false);
