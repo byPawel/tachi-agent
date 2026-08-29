@@ -271,7 +271,7 @@ The `claude` worker runs headless Claude Code (`claude -p … --output-format js
 
 ### Billing
 
-Grok workers authenticate with the grok.com login session by default and bill the SuperGrok subscription pool — session auth takes precedence over `XAI_API_KEY` (verified live 2026-08-29). Codex workers bill the ChatGPT-plan login the same way. To force API billing for grok workers, provide `XAI_API_KEY` and point `GROK_HOME` at an isolated directory with no session file.
+Grok workers authenticate with the grok.com login session by default and bill the SuperGrok subscription pool — session auth takes precedence over `XAI_API_KEY` (verified live 2026-08-29). Codex workers currently bill the ChatGPT-plan login (`auth_mode: chatgpt`; no API key is present in the worker env — codex's own key-vs-login precedence is untested). To force API billing for grok workers, provide `XAI_API_KEY` and point `GROK_HOME` at an isolated directory with no session file. The grok `--disallowed-tools` spawn flag requires grok CLI >= 1.0.13.
 
 ### Using tachi-agent from other CLIs (vice versa)
 
