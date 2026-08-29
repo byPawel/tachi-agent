@@ -6,7 +6,7 @@
  * needs. Extend per-machine with TACHI_WORKER_ENV_ALLOW when a specific worker
  * legitimately needs another variable.
  */
-export type WorkerAgentName = "codex" | "grok" | "hermes" | "openrouter";
+export type WorkerAgentName = "codex" | "grok" | "hermes" | "openrouter" | "gemini" | "claude";
 
 /** OS/runtime basics every CLI needs to function. Never secrets. */
 const BASE_ALLOW = [
@@ -22,6 +22,11 @@ const AGENT_ALLOW: Record<WorkerAgentName, string[]> = {
   grok: ["XAI_API_KEY", "GROK_API_KEY", "GROK_HOME"],
   hermes: ["HERMES_CLI", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TACHI_OPENROUTER_CODING_MODEL", "OPENROUTER_MODEL"],
   openrouter: ["HERMES_CLI", "OPENROUTER_API_KEY", "TACHI_OPENROUTER_CODING_MODEL", "OPENROUTER_MODEL"],
+  gemini: [
+    "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+  ],
+  claude: ["ANTHROPIC_API_KEY"],
 };
 
 function extraAllow(baseEnv: NodeJS.ProcessEnv): string[] {
@@ -40,5 +45,10 @@ export function buildWorkerEnv(
     const v = baseEnv[key];
     if (typeof v === "string" && v !== "") out[key] = v;
   }
+  // Recursion marker: the allowlist strips Claude Code's own CLAUDECODE
+  // nested-launch brake, so this stamp replaces it — the MCP handler refuses
+  // to spawn workers when its own env already carries it. Set after the copy
+  // loop so no inherited/allowlisted value can override it.
+  out.TACHI_CODING_DEPTH = "1";
   return out;
 }

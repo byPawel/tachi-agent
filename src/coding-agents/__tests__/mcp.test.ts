@@ -8,6 +8,25 @@ describe("run_coding_agent MCP handler", () => {
     "dokoro_dokoro_handoff_write",
   ].map((name) => ({ name, description: "", parameters: {} }));
 
+  it("refuses nested spawns before acquiring any resources", async () => {
+    process.env.TACHI_CODING_DEPTH = "1";
+    try {
+      const callInternal = vi.fn(async () => "ok");
+      const runtime = {
+        host: { internalTools: () => coordinationTools, callInternal },
+        memory: { log: vi.fn(async () => undefined) },
+      } as any;
+      const runner = vi.fn();
+      const out = await runCodingAgentHandler(runtime, { agent: "codex", task: "t" }, runner as any);
+      expect(out.isError).toBe(true);
+      expect(out.content[0].text).toMatch(/recursion guard/i);
+      expect(runner).not.toHaveBeenCalled();
+      expect(callInternal).not.toHaveBeenCalled(); // no lease, no handoff
+    } finally {
+      delete process.env.TACHI_CODING_DEPTH;
+    }
+  });
+
   it("returns the worker result synchronously and persists a Dokoro report", async () => {
     const callInternal = vi.fn(async () => "ok");
     const log = vi.fn(async () => undefined);

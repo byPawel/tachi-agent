@@ -20,13 +20,17 @@ export interface PreflightResult {
   reason?: string;
 }
 
-type Agent = "codex" | "grok" | "hermes" | "openrouter";
+type Agent = "codex" | "grok" | "hermes" | "openrouter" | "gemini" | "claude";
 
 const CRED_HINT: Record<Agent, string> = {
   codex: "set CODEX_API_KEY or OPENAI_API_KEY, or run `codex login`",
   grok: "set XAI_API_KEY (or GROK_API_KEY), or run `grok login`",
   hermes: "set OPENROUTER_API_KEY (or the provider key Hermes is configured for)",
   openrouter: "set OPENROUTER_API_KEY",
+  gemini: "set GEMINI_API_KEY (or GOOGLE_API_KEY / GOOGLE_APPLICATION_CREDENTIALS), " +
+    "or run `gemini` once to complete OAuth — install: npm i -g @google/gemini-cli",
+  claude: "set ANTHROPIC_API_KEY, or sign in once via `claude` (login state lives under ~/.claude) — " +
+    "install: npm i -g @anthropic-ai/claude-code",
 };
 
 async function hasCredential(agent: Agent, deps: PreflightDeps): Promise<boolean> {
@@ -43,6 +47,14 @@ async function hasCredential(agent: Agent, deps: PreflightDeps): Promise<boolean
       return Boolean(env.OPENROUTER_API_KEY || env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY);
     case "openrouter":
       return Boolean(env.OPENROUTER_API_KEY);
+    case "gemini":
+      return Boolean(env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_APPLICATION_CREDENTIALS)
+        || (home ? deps.fileExists(join(home, ".gemini", "oauth_creds.json")) : false);
+    case "claude":
+      return Boolean(env.ANTHROPIC_API_KEY)
+        || (home
+          ? (await deps.fileExists(join(home, ".claude.json"))) || deps.fileExists(join(home, ".claude"))
+          : false);
   }
 }
 

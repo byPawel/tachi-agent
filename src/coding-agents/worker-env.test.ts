@@ -1,6 +1,37 @@
 import { describe, it, expect } from "vitest";
 import { buildWorkerEnv } from "./worker-env.js";
 
+describe("gemini worker env", () => {
+  it("forwards Google credential keys and strips unrelated secrets", () => {
+    const env = buildWorkerEnv("gemini", {
+      PATH: "/bin",
+      GEMINI_API_KEY: "g",
+      GOOGLE_CLOUD_PROJECT: "proj",
+      OPENROUTER_API_KEY: "leak-me-not",
+    });
+    expect(env.GEMINI_API_KEY).toBe("g");
+    expect(env.GOOGLE_CLOUD_PROJECT).toBe("proj");
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+  });
+});
+
+describe("claude worker env", () => {
+  it("forwards only the Anthropic key and strips Claude Code session markers", () => {
+    const env = buildWorkerEnv("claude", {
+      PATH: "/bin",
+      ANTHROPIC_API_KEY: "sk",
+      CLAUDECODE: "1",
+      OPENROUTER_API_KEY: "leak-me-not",
+    });
+    expect(env.ANTHROPIC_API_KEY).toBe("sk");
+    // CLAUDECODE must not reach the worker — the nested-launch brake is
+    // replaced by the TACHI_CODING_DEPTH stamp.
+    expect(env.CLAUDECODE).toBeUndefined();
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.TACHI_CODING_DEPTH).toBe("1");
+  });
+});
+
 const base = {
   PATH: "/usr/bin", HOME: "/home/dev", TERM: "xterm",
   OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key",
@@ -45,5 +76,20 @@ describe("buildWorkerEnv", () => {
     const snapshot = { ...base };
     buildWorkerEnv("codex", base);
     expect(base).toEqual(snapshot);
+  });
+
+  it("stamps TACHI_CODING_DEPTH=1 for every agent", () => {
+    for (const agent of ["codex", "grok", "hermes", "openrouter"] as const) {
+      expect(buildWorkerEnv(agent, base).TACHI_CODING_DEPTH).toBe("1");
+    }
+  });
+
+  it("overrides an inherited TACHI_CODING_DEPTH even when allowlisted", () => {
+    const env = buildWorkerEnv("codex", {
+      ...base,
+      TACHI_CODING_DEPTH: "0",
+      TACHI_WORKER_ENV_ALLOW: "TACHI_CODING_DEPTH",
+    });
+    expect(env.TACHI_CODING_DEPTH).toBe("1");
   });
 });

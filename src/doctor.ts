@@ -193,7 +193,7 @@ async function checkDaemon(deps: DoctorDeps): Promise<CheckResult> {
   };
 }
 
-const CODING_AGENTS = ["codex", "grok", "hermes", "openrouter"] as const;
+const CODING_AGENTS = ["codex", "grok", "hermes", "openrouter", "gemini", "claude"] as const;
 
 function agentCommand(agent: string, env: Record<string, string | undefined>): string {
   const key = agent === "openrouter" ? "HERMES_CLI" : `${agent.toUpperCase()}_CLI`;

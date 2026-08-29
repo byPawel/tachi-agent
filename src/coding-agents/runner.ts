@@ -3,8 +3,11 @@ import { access, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { buildWorkerEnv, type WorkerAgentName } from "./worker-env.js";
 import { preflightCodingAgent, type PreflightDeps } from "./preflight.js";
+import { parseGeminiJson, reviewGuard } from "./gemini-parse.js";
+import { parseClaudeEnvelope } from "./claude-parse.js";
+import { createReviewWorktree, type ReviewWorktree } from "./review-worktree.js";
 
-export type CodingAgentName = "codex" | "grok" | "hermes" | "openrouter";
+export type CodingAgentName = "codex" | "grok" | "hermes" | "openrouter" | "gemini" | "claude";
 export type CodingAgentMode = "review" | "write";
 export type CodingAgentVisibility = "final" | "trace" | "live";
 export type CodingAgentProgressKind =
@@ -112,6 +115,11 @@ export function writeAuthorized(args: { mode?: CodingAgentMode; env?: NodeJS.Pro
 
 /** Build argv without a shell: tasks/models are values, never executable syntax. */
 export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string }): CodingAgentCommand {
+  // A leading dash would let the task masquerade as a CLI flag (option-value
+  // parsing is parser-dependent for grok/hermes; codex gets `--` too).
+  if (/^\s*-/.test(args.task)) {
+    throw new Error('coding agent task must not start with "-" — prefix it, e.g. "Task: …"');
+  }
   const mode = args.mode ?? "review";
   const maxTurns = clampInt(args.maxTurns, 40, 1, 500);
 
@@ -125,8 +133,33 @@ export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string
       "-C", args.cwd,
     ];
     if (args.model?.trim()) argv.push("-m", args.model.trim());
-    argv.push(args.task);
+    argv.push("--", args.task);
     return { command: envCommand("codex"), args: argv, cwd: args.cwd, env: buildWorkerEnv("codex", process.env) };
+  }
+
+  if (args.agent === "gemini") {
+    const argv = ["-p", args.task, "--output-format", "json"];
+    // Headless plan mode can auto-flip to YOLO after plan-exit; review runs
+    // are therefore ALSO worktree-isolated and tamper-checked by the caller.
+    if (mode === "write") argv.push("--yolo");
+    else argv.push("--approval-mode", "plan");
+    if (args.model?.trim()) argv.push("-m", args.model.trim());
+    return { command: envCommand("gemini"), args: argv, cwd: args.cwd, env: buildWorkerEnv("gemini", process.env) };
+  }
+
+  if (args.agent === "claude") {
+    const argv = [
+      "-p", args.task,
+      "--output-format", "json",
+      // Never load the user-scope ~/.claude MCP config: it could re-mount
+      // tachi-agent-mcp and recurse around the env marker, or fire user hooks
+      // in the worker cwd.
+      "--strict-mcp-config",
+      "--max-turns", String(maxTurns),
+      "--permission-mode", mode === "write" ? "acceptEdits" : "plan",
+    ];
+    if (args.model?.trim()) argv.push("--model", args.model.trim());
+    return { command: envCommand("claude"), args: argv, cwd: args.cwd, env: buildWorkerEnv("claude", process.env) };
   }
 
   if (args.agent === "grok") {
@@ -428,10 +461,46 @@ function parseGrok(stdout: string): { answer: string; trace: CodingAgentProgress
   }
 }
 
+function parseGemini(stdout: string, mode: CodingAgentMode): { answer: string; trace: CodingAgentProgress[]; sessionId?: string } {
+  const parsed = parseGeminiJson(stdout);
+  if (parsed.error?.message) throw new Error(`gemini reported an error: ${parsed.error.message}`);
+  if (mode === "review") {
+    // Fail closed BEFORE any success path: a tampered review must never reach
+    // a clean dokoro handoff (the MCP layer records the failure instead).
+    const guard = reviewGuard(parsed);
+    if (!guard.ok) throw new Error(`gemini review tamper guard: ${guard.reason}`);
+  }
+  return { answer: parsed.response ?? stdout.trim(), trace: [] };
+}
+
+function parseClaudeResult(stdout: string, mode: CodingAgentMode): { answer: string; trace: CodingAgentProgress[]; sessionId?: string } {
+  const parsed = parseClaudeEnvelope(stdout);
+  if (parsed.isError) {
+    throw new Error(`claude worker error: ${concise(parsed.text ?? parsed.raw, 8_000)}`);
+  }
+  const answer = parsed.text ?? stdout.trim();
+  // Headless acceptEdits denies Bash-class calls rather than prompting; a
+  // write task that hit denials completed only partially — say so.
+  const degraded = mode === "write" && parsed.deniedCalls > 0
+    ? `\n\n⚠ ${parsed.deniedCalls} tool call(s) denied by headless permission limits — the task may be incomplete.`
+    : "";
+  return {
+    answer: answer + degraded,
+    trace: [],
+    ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+  };
+}
+
 export async function runCodingAgent(
   args: RunCodingAgentArgs,
   executor: CommandExecutor = executeCommand,
+  worktreeFactory: (repoCwd: string) => Promise<ReviewWorktree> = createReviewWorktree,
 ): Promise<CodingAgentResult> {
+  // Defense in depth behind the MCP handler's early refusal: every worker env
+  // carries TACHI_CODING_DEPTH, so a worker-driven re-entry lands here too.
+  if (process.env.TACHI_CODING_DEPTH) {
+    throw new Error("recursion guard: refusing to spawn a coding agent from inside a tachi-spawned worker");
+  }
   if (!args.task?.trim()) throw new Error("coding agent task must not be empty");
   const cwd = await resolveCodingCwd(args.cwd);
   const command = envCommand(args.agent);
@@ -457,7 +526,13 @@ export async function runCodingAgent(
   const visibility = args.visibility ?? "trace";
   const timeoutMs = clampInt(args.timeoutMs, DEFAULT_CODING_TIMEOUT_MS, 1_000, MAX_CODING_TIMEOUT_MS);
   const model = args.agent === "openrouter" ? openRouterCodingModel(args.model) : args.model?.trim();
-  const spec = buildCodingAgentCommand({ ...args, task: args.task.trim(), cwd, timeoutMs, mode, model });
+  // Gemini review runs in a throwaway detached-HEAD worktree: its headless
+  // plan mode is not reliably read-only, so the requested checkout is never
+  // the spawn cwd. The tamper guard then audits the disposable copy.
+  const worktree = args.agent === "gemini" && mode === "review"
+    ? await worktreeFactory(cwd)
+    : undefined;
+  const spec = buildCodingAgentCommand({ ...args, task: args.task.trim(), cwd: worktree?.dir ?? cwd, timeoutMs, mode, model });
   let progressQueue = Promise.resolve();
   const publish = (update: CodingAgentProgress) => {
     if (visibility !== "live" || !args.onProgress) return;
@@ -470,48 +545,57 @@ export async function runCodingAgent(
       if (update) publish(update);
     })
     : undefined;
-  const processResult = await executor(spec, {
-    timeoutMs,
-    maxOutputChars: DEFAULT_MAX_OUTPUT_CHARS,
-    signal: args.signal,
-    ...(decoder ? { onStdout: decoder.push } : {}),
-  });
-  decoder?.flush();
-  if (processResult.timedOut) {
-    publish({ kind: "error", message: `${args.agent} timed out after ${timeoutMs}ms.` });
-    await progressQueue;
-    throw new Error(`${args.agent} coding agent timed out after ${timeoutMs}ms`);
-  }
-  if (processResult.aborted) {
-    publish({ kind: "error", message: `${args.agent} was aborted.` });
-    await progressQueue;
-    throw new Error(`${args.agent} coding agent was aborted`);
-  }
-  if (processResult.exitCode !== 0) {
-    const detail = processResult.stderr.trim() || processResult.stdout.trim() || `exit ${processResult.exitCode}`;
-    publish({ kind: "error", message: `${args.agent} failed with exit ${processResult.exitCode}.` });
-    await progressQueue;
-    throw new Error(`${args.agent} coding agent failed: ${detail.slice(0, 8_000)}`);
-  }
+  try {
+    const processResult = await executor(spec, {
+      timeoutMs,
+      maxOutputChars: DEFAULT_MAX_OUTPUT_CHARS,
+      signal: args.signal,
+      ...(decoder ? { onStdout: decoder.push } : {}),
+    });
+    decoder?.flush();
+    if (processResult.timedOut) {
+      publish({ kind: "error", message: `${args.agent} timed out after ${timeoutMs}ms.` });
+      await progressQueue;
+      throw new Error(`${args.agent} coding agent timed out after ${timeoutMs}ms`);
+    }
+    if (processResult.aborted) {
+      publish({ kind: "error", message: `${args.agent} was aborted.` });
+      await progressQueue;
+      throw new Error(`${args.agent} coding agent was aborted`);
+    }
+    if (processResult.exitCode !== 0) {
+      const detail = processResult.stderr.trim() || processResult.stdout.trim() || `exit ${processResult.exitCode}`;
+      publish({ kind: "error", message: `${args.agent} failed with exit ${processResult.exitCode}.` });
+      await progressQueue;
+      throw new Error(`${args.agent} coding agent failed: ${detail.slice(0, 8_000)}`);
+    }
 
-  const parsed = args.agent === "codex"
-    ? parseCodex(processResult.stdout)
-    : args.agent === "grok"
-      ? parseGrok(processResult.stdout)
-      : { answer: processResult.stdout.trim(), trace: [] as CodingAgentProgress[] };
-  const provider = args.agent === "openrouter" ? "openrouter" : args.provider?.trim();
-  publish({ kind: "status", message: `${args.agent} coding agent completed successfully.` });
-  await progressQueue;
-  return {
-    ...processResult,
-    agent: args.agent,
-    mode,
-    cwd,
-    ...(model ? { model } : {}),
-    ...(provider ? { provider } : {}),
-    isolated: (args.agent === "hermes" || args.agent === "openrouter") && (mode === "review" || args.isolate !== false),
-    answer: parsed.answer,
-    ...(visibility !== "final" && parsed.trace.length ? { trace: parsed.trace } : {}),
-    ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
-  };
+    const parsed = args.agent === "codex"
+      ? parseCodex(processResult.stdout)
+      : args.agent === "grok"
+        ? parseGrok(processResult.stdout)
+        : args.agent === "gemini"
+          ? parseGemini(processResult.stdout, mode)
+          : args.agent === "claude"
+            ? parseClaudeResult(processResult.stdout, mode)
+            : { answer: processResult.stdout.trim(), trace: [] as CodingAgentProgress[] };
+    const provider = args.agent === "openrouter" ? "openrouter" : args.provider?.trim();
+    publish({ kind: "status", message: `${args.agent} coding agent completed successfully.` });
+    await progressQueue;
+    return {
+      ...processResult,
+      agent: args.agent,
+      mode,
+      cwd,
+      ...(model ? { model } : {}),
+      ...(provider ? { provider } : {}),
+      isolated: ((args.agent === "hermes" || args.agent === "openrouter") && (mode === "review" || args.isolate !== false))
+        || Boolean(worktree),
+      answer: parsed.answer,
+      ...(visibility !== "final" && parsed.trace.length ? { trace: parsed.trace } : {}),
+      ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+    };
+  } finally {
+    await worktree?.cleanup();
+  }
 }

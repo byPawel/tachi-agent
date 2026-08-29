@@ -146,6 +146,8 @@ Claude Code (coordinator / Fable bridge)
     tachi-agent MCP
         ├── Codex CLI
         ├── Grok CLI
+        ├── Gemini CLI          (review isolated in a throwaway worktree)
+        ├── Claude Code         (headless claude -p, the "vice versa" worker)
         ├── Hermes Agent
         └── Hermes Agent + OpenRouter model
                  │
@@ -181,7 +183,9 @@ npm run build
 
 Workers run as real local processes, so the tool is hardened to keep an injected task (or untrusted repository content) from escalating:
 
-- **Review is the default and is safe.** Review mode is read-only for Codex/Grok and worktree-isolated for Hermes/OpenRouter; the auto-approve flags (`--always-approve`, `--yolo`) are emitted **only** in write mode.
+- **Review is the default and is safe.** Review mode is read-only for Codex/Grok (sandbox flags) and Claude (`--permission-mode plan`), and worktree-isolated for Hermes/OpenRouter/Gemini; the auto-approve flags (`--always-approve`, `--yolo`) are emitted **only** in write mode.
+- **Gemini review is contained twice.** Gemini's headless `--approval-mode plan` is not reliably read-only (it can auto-flip to YOLO after plan-exit), so review runs spawn in a throwaway detached-HEAD git worktree AND a post-run tamper guard fails the run if the stats report file changes or mutating tool calls. Consequence: the gemini reviewer sees `HEAD`, not uncommitted changes — review dirty state with codex/grok/claude instead.
+- **Recursion is refused.** Every worker env carries `TACHI_CODING_DEPTH=1`; when the server itself runs inside a tachi-spawned worker, `run_coding_agent` refuses before acquiring any slot or lease. The claude worker additionally gets `--strict-mcp-config` so a user-scope config can never re-mount tachi-agent-mcp inside the worker.
 - **Write mode is opt-in.** `run_coding_agent` refuses `mode: "write"` unless `TACHI_CODING_ALLOW_WRITE=1` (or `true`) is set in the server environment.
 - **Minimal worker environment.** The full `process.env` is **not** inherited. Each worker gets only OS basics (PATH/HOME-class) plus the specific credential its own agent needs (e.g. Codex sees `CODEX_API_KEY`/`OPENAI_API_KEY`, not your gateway tokens or unrelated cloud keys). Add extra passthrough variables with `TACHI_WORKER_ENV_ALLOW` (comma-separated).
 - **Auth preflight.** Before spawning, the binary and a usable credential are verified; a missing key returns an actionable error immediately instead of hanging until the run timeout. `tachi-agent doctor` reports the same readiness per agent (scope it with `TACHI_CODING_AGENTS`).
@@ -194,13 +198,13 @@ Workers run as real local processes, so the tool is hardened to keep an injected
 | `TACHI_CODING_ALLOW_WRITE` | `1`/`true` to permit `mode: "write"` (default: write disabled) |
 | `TACHI_CODING_MAX_CONCURRENCY` | Max concurrent workers, clamped 1–16 (default 3) |
 | `TACHI_WORKER_ENV_ALLOW` | Extra env var names to pass through to workers |
-| `TACHI_CODING_AGENTS` | Comma-separated agents for `doctor` to probe (default: all four) |
+| `TACHI_CODING_AGENTS` | Comma-separated agents for `doctor` to probe (default: all six) |
 
 The MCP server exposes `run_coding_agent`:
 
 | Input | Purpose |
 |---|---|
-| `agent` | `codex`, `grok`, `hermes`, or `openrouter` |
+| `agent` | `codex`, `grok`, `gemini`, `claude`, `hermes`, or `openrouter` |
 | `task` | Complete worker prompt, including acceptance criteria |
 | `cwd` | Repository under `TACHI_CODING_ROOTS` |
 | `mode` | `review` for read-only/isolated analysis; `write` for explicit implementation |
@@ -248,6 +252,52 @@ Example tool arguments:
 ```
 
 For a reusable Claude Code bridge, create a project subagent in `.claude/agents/`, set `model: fable`, scope `mcpServers` to `tachi-agent`, and allow only `mcp__tachi-agent__run_coding_agent`. The bridge should forward the full task once and return the external worker result without implementing the task itself.
+
+### Gemini and Claude workers
+
+The `gemini` worker runs Google's Gemini CLI headless (`gemini -p … --output-format json`). Review mode uses `--approval-mode plan` inside a throwaway worktree with the tamper guard described above; write mode (gated) uses `--yolo` against the requested checkout, where Dokoro leases apply. Credentials, in preflight order: `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, or a cached OAuth login (`~/.gemini/oauth_creds.json`). Vertex mode additionally needs `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` (all passed through). Install: `npm i -g @google/gemini-cli`; override the binary with `GEMINI_CLI`.
+
+The `claude` worker runs headless Claude Code (`claude -p … --output-format json --strict-mcp-config`). Review mode uses `--permission-mode plan` and returns the extracted plan; write mode (gated) uses `--permission-mode acceptEdits` — headless runs deny Bash-class calls instead of prompting, so a degraded run is flagged with `⚠ N tool call(s) denied`. Credentials: `ANTHROPIC_API_KEY` or an existing `claude` login under `~/.claude*`. Override the binary with `CLAUDE_CLI`.
+
+### Using tachi-agent from other CLIs (vice versa)
+
+`tachi-agent-mcp` is a standard stdio MCP server, so the same `run_coding_agent` tool works from Codex CLI, Gemini CLI, or Grok CLI — including delegating a task to headless Claude Code (`agent: "claude"`). Registration snippets:
+
+```toml
+# Codex CLI — ~/.codex/config.toml
+[mcp_servers.tachi-agent]
+command = "node"
+args = ["/absolute/path/to/tachi-agent/dist/frontends/mcp-server.js"]
+env = { TACHI_CODING_ROOTS = "/absolute/path/to/allowed/repository" }
+```
+
+```jsonc
+// Gemini CLI — ~/.gemini/settings.json
+{
+  "mcpServers": {
+    "tachi-agent": {
+      "command": "node",
+      "args": ["/absolute/path/to/tachi-agent/dist/frontends/mcp-server.js"],
+      "env": { "TACHI_CODING_ROOTS": "/absolute/path/to/allowed/repository" }
+    }
+  }
+}
+```
+
+```json
+// Grok CLI — its mcpServers config block uses the same shape
+{
+  "mcpServers": {
+    "tachi-agent": {
+      "command": "node",
+      "args": ["/absolute/path/to/tachi-agent/dist/frontends/mcp-server.js"],
+      "env": { "TACHI_CODING_ROOTS": "/absolute/path/to/allowed/repository" }
+    }
+  }
+}
+```
+
+**Run one server instance per client, each with its own `env` block.** `TACHI_CODING_ALLOW_WRITE=1` grants write mode to *every* model that can reach that instance — set it only on the instance mounted in the client you trust to author changes, and leave review-only instances without it. The recursion guard keeps these mounts from chaining (a worker spawned by any instance cannot spawn workers of its own).
 
 ### Parallelism and coordination
 

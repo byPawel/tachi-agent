@@ -21,10 +21,15 @@ afterEach(() => {
   delete process.env.CODEX_CLI;
   delete process.env.GROK_CLI;
   delete process.env.HERMES_CLI;
+  delete process.env.GEMINI_CLI;
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.CLAUDE_CLI;
+  delete process.env.ANTHROPIC_API_KEY;
   delete process.env.XAI_API_KEY;
   delete process.env.OPENROUTER_MODEL;
   delete process.env.TACHI_OPENROUTER_CODING_MODEL;
   delete process.env.TACHI_CODING_ROOTS;
+  delete process.env.TACHI_CODING_DEPTH;
 });
 
 describe("buildCodingAgentCommand", () => {
@@ -60,6 +65,56 @@ describe("buildCodingAgentCommand", () => {
     process.env.TACHI_OPENROUTER_CODING_MODEL = "deepseek/deepseek-v3.2";
     const spec = buildCodingAgentCommand({ agent: "openrouter", task: "x", cwd: CWD });
     expect(spec.args).toEqual(expect.arrayContaining(["--model", "deepseek/deepseek-v3.2"]));
+  });
+
+  it("terminates Codex flag parsing with -- before the positional task", () => {
+    const spec = buildCodingAgentCommand({ agent: "codex", task: "review this", cwd: CWD, mode: "review" });
+    expect(spec.args.at(-2)).toBe("--");
+    expect(spec.args.at(-1)).toBe("review this");
+  });
+
+  it("rejects tasks that start with a dash for every agent", () => {
+    for (const agent of ["codex", "grok", "hermes", "openrouter"] as const) {
+      expect(() => buildCodingAgentCommand({ agent, task: "-rf /", cwd: CWD, model: "m" }))
+        .toThrow(/must not start with "-"/);
+      expect(() => buildCodingAgentCommand({ agent, task: "  --help", cwd: CWD, model: "m" }))
+        .toThrow(/must not start with "-"/);
+    }
+  });
+
+  it("accepts tasks that merely contain dashes", () => {
+    const spec = buildCodingAgentCommand({ agent: "codex", task: "Task: -rf is dangerous", cwd: CWD });
+    expect(spec.args.at(-1)).toBe("Task: -rf is dangerous");
+  });
+
+  it("builds gemini review argv in plan approval mode without yolo", () => {
+    const spec = buildCodingAgentCommand({ agent: "gemini", task: "review src", cwd: CWD, mode: "review", model: "gemini-2.5-pro" });
+    expect(spec.command).toBe("gemini");
+    expect(spec.args).toEqual(expect.arrayContaining(["-p", "review src", "--output-format", "json", "--approval-mode", "plan", "-m", "gemini-2.5-pro"]));
+    expect(spec.args).not.toContain("--yolo");
+  });
+
+  it("emits --yolo for gemini only in write mode", () => {
+    const spec = buildCodingAgentCommand({ agent: "gemini", task: "fix it", cwd: CWD, mode: "write" });
+    expect(spec.args).toContain("--yolo");
+    expect(spec.args).not.toContain("--approval-mode");
+  });
+
+  it("builds claude review argv in plan permission mode with strict mcp config", () => {
+    const spec = buildCodingAgentCommand({ agent: "claude", task: "review src", cwd: CWD, mode: "review", maxTurns: 12, model: "claude-sonnet-5" });
+    expect(spec.command).toBe("claude");
+    expect(spec.args).toEqual(expect.arrayContaining([
+      "-p", "review src", "--output-format", "json",
+      "--permission-mode", "plan", "--strict-mcp-config",
+      "--max-turns", "12", "--model", "claude-sonnet-5",
+    ]));
+    expect(spec.args).not.toContain("acceptEdits");
+  });
+
+  it("claude write mode uses acceptEdits and keeps user-config isolation", () => {
+    const spec = buildCodingAgentCommand({ agent: "claude", task: "fix it", cwd: CWD, mode: "write" });
+    expect(spec.args).toEqual(expect.arrayContaining(["--permission-mode", "acceptEdits", "--strict-mcp-config"]));
+    expect(spec.args).not.toContain("plan");
   });
 });
 
@@ -175,5 +230,126 @@ describe("preflight", () => {
       // executor that would fail if reached
       async () => { throw new Error("should not spawn"); },
     )).rejects.toThrow(/OPENROUTER_API_KEY|not found on PATH/i);
+  });
+});
+
+describe("gemini worker execution", () => {
+  const geminiEnv = () => {
+    process.env.GEMINI_CLI = process.execPath;
+    process.env.GEMINI_API_KEY = "test-key";
+  };
+  const cleanOk = JSON.stringify({
+    response: "looks good",
+    stats: { files: { totalLinesAdded: 0, totalLinesRemoved: 0 }, tools: { byName: { read_file: 2 } } },
+  });
+
+  it("runs review mode inside a throwaway worktree and cleans it up", async () => {
+    geminiEnv();
+    const cleanup = vi.fn(async () => undefined);
+    const worktree = vi.fn(async () => ({ dir: CWD, cleanup }));
+    const executor: CommandExecutor = vi.fn(async (spec) => {
+      expect(spec.cwd).toBe(CWD); // worktree dir, not the requested checkout
+      return ok(cleanOk);
+    });
+    const result = await runCodingAgent({ agent: "gemini", task: "review src", cwd: CWD }, executor, worktree);
+    expect(worktree).toHaveBeenCalledWith(CWD);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(result.answer).toBe("looks good");
+    expect(result.isolated).toBe(true);
+  });
+
+  it("fails the run when the tamper guard trips, and still cleans up", async () => {
+    geminiEnv();
+    const cleanup = vi.fn(async () => undefined);
+    const worktree = vi.fn(async () => ({ dir: CWD, cleanup }));
+    const tampered = JSON.stringify({
+      response: "done",
+      stats: { files: { totalLinesAdded: 4, totalLinesRemoved: 0 } },
+    });
+    await expect(runCodingAgent(
+      { agent: "gemini", task: "review src", cwd: CWD },
+      async () => ok(tampered),
+      worktree,
+    )).rejects.toThrow(/tamper guard/i);
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("write mode skips the worktree and surfaces gemini-reported errors", async () => {
+    geminiEnv();
+    const worktree = vi.fn(async () => ({ dir: "/never", cleanup: async () => undefined }));
+    const failed = JSON.stringify({ error: { type: "ApiError", message: "quota exhausted" } });
+    await expect(runCodingAgent(
+      { agent: "gemini", task: "fix it", cwd: CWD, mode: "write" },
+      async () => ok(failed),
+      worktree,
+    )).rejects.toThrow(/quota exhausted/);
+    expect(worktree).not.toHaveBeenCalled();
+  });
+});
+
+describe("claude worker execution", () => {
+  const claudeEnv = () => {
+    process.env.CLAUDE_CLI = process.execPath;
+    process.env.ANTHROPIC_API_KEY = "test-key";
+  };
+
+  it("review mode extracts the plan from ExitPlanMode denials", async () => {
+    claudeEnv();
+    const envelope = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: "Claude requested permissions to exit plan mode, but you haven't granted it.",
+      session_id: "sess-42",
+      permission_denials: [
+        { tool_name: "Bash", tool_input: { command: "ls" } },
+        { tool_name: "ExitPlanMode", tool_input: { plan: "## Plan\n1. Look\n2. Report" } },
+      ],
+    });
+    const result = await runCodingAgent(
+      { agent: "claude", task: "plan a refactor", cwd: CWD },
+      async () => ok(envelope),
+    );
+    expect(result.answer).toBe("## Plan\n1. Look\n2. Report");
+    expect(result.sessionId).toBe("sess-42");
+  });
+
+  it("write mode surfaces denied tool calls as a degradation warning", async () => {
+    claudeEnv();
+    const envelope = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: "Edited 2 files. Could not run the test suite.",
+      permission_denials: [
+        { tool_name: "Bash", tool_input: { command: "npm test" } },
+        { tool_name: "WebFetch", tool_input: {} },
+      ],
+    });
+    const result = await runCodingAgent(
+      { agent: "claude", task: "fix and test", cwd: CWD, mode: "write" },
+      async () => ok(envelope),
+    );
+    expect(result.answer).toContain("Edited 2 files.");
+    expect(result.answer).toMatch(/2 tool call/);
+    expect(result.answer).toMatch(/denied/);
+  });
+
+  it("fails closed on error envelopes", async () => {
+    claudeEnv();
+    const envelope = JSON.stringify({ type: "result", is_error: true, result: "credit balance too low" });
+    await expect(runCodingAgent(
+      { agent: "claude", task: "t", cwd: CWD },
+      async () => ok(envelope),
+    )).rejects.toThrow(/credit balance too low/);
+  });
+});
+
+describe("recursion guard", () => {
+  it("refuses to spawn any worker when TACHI_CODING_DEPTH is already set", async () => {
+    process.env.CODEX_CLI = process.execPath;
+    process.env.TACHI_CODING_DEPTH = "1";
+    const executor = vi.fn(async () => ok("nope"));
+    await expect(runCodingAgent({ agent: "codex", task: "t", cwd: CWD }, executor))
+      .rejects.toThrow(/recursion guard/i);
+    expect(executor).not.toHaveBeenCalled();
   });
 });
