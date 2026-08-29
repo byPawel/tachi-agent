@@ -205,6 +205,53 @@ describe("run_coding_agent MCP handler", () => {
       .toEqual(["codex", "grok", "hermes", "openrouter", "gemini", "claude"]);
   });
 
+  it("prints an enter-session command for agents whose CLI can resume the worker session", async () => {
+    const withSession = (agent: CodingAgentResult["agent"]) => async (): Promise<CodingAgentResult> => ({
+      ...(await writeResult()),
+      agent,
+      mode: "review",
+      sessionId: "01a04e0e-18d3-7d02-94bb-4d67cd6febb0",
+    });
+    const grokOut = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "grok", task: "t", reportToDokoro: false },
+      withSession("grok"),
+    );
+    expect(grokOut.content[0].text).toContain("enter: grok -r 01a04e0e-18d3-7d02-94bb-4d67cd6febb0");
+    const codexOut = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "codex", task: "t", reportToDokoro: false },
+      withSession("codex"),
+    );
+    expect(codexOut.content[0].text).toContain("enter: codex resume 01a04e0e-18d3-7d02-94bb-4d67cd6febb0");
+    const claudeOut = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "claude", task: "t", reportToDokoro: false },
+      withSession("claude"),
+    );
+    expect(claudeOut.content[0].text).toContain("enter: claude -r 01a04e0e-18d3-7d02-94bb-4d67cd6febb0");
+  });
+
+  it("omits the enter-session hint without a session id or for CLIs with no resume", async () => {
+    const noSession = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "codex", task: "t", reportToDokoro: false },
+      async () => ({ ...(await writeResult()), mode: "review" }),
+    );
+    expect(noSession.content[0].text).not.toContain("enter:");
+    const gemini = await runCodingAgentHandler(
+      bareRuntime(),
+      { agent: "gemini", task: "t", reportToDokoro: false },
+      async (): Promise<CodingAgentResult> => ({
+        ...(await writeResult()),
+        agent: "gemini",
+        mode: "review",
+        sessionId: "abc",
+      }),
+    );
+    expect(gemini.content[0].text).not.toContain("enter:");
+  });
+
   it("flags unconfirmed leases when plannedFiles were requested but not claimed", async () => {
     const reviewResult = async (): Promise<CodingAgentResult> => ({ ...(await writeResult()), mode: "review" });
     const out = await runCodingAgentHandler(

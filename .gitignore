@@ -25,3 +25,4 @@ docs/superpowers/plans/
 
 # remember-plugin session buffers
 .remember/
+.agents/

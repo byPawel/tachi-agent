@@ -46,7 +46,7 @@ describe("buildCodingAgentCommand", () => {
 
   it("maps Grok write mode to its workspace sandbox", () => {
     const spec = buildCodingAgentCommand({ agent: "grok", task: "fix it", cwd: CWD, mode: "write", maxTurns: 9 });
-    expect(spec.args).toEqual(expect.arrayContaining(["--sandbox", "workspace", "--always-approve", "--max-turns", "9"]));
+    expect(spec.args).toEqual(expect.arrayContaining(["--sandbox", "workspace", "--no-subagents", "--disallowed-tools", "Agent", "--always-approve", "--max-turns", "9"]));
     expect(spec.args).not.toContain("read_file,grep,list_dir,run_terminal_cmd");
   });
 
@@ -205,7 +205,7 @@ describe("auto-approve gating", () => {
   it("grok review mode omits --always-approve and adds --no-subagents", () => {
     const spec = buildCodingAgentCommand({ agent: "grok", task: "t", cwd: process.cwd(), mode: "review" });
     expect(spec.args).not.toContain("--always-approve");
-    expect(spec.args).toContain("--no-subagents");
+    expect(spec.args).toEqual(expect.arrayContaining(["--no-subagents", "--disallowed-tools", "Agent"]));
   });
   it("grok write mode includes --always-approve", () => {
     const spec = buildCodingAgentCommand({ agent: "grok", task: "t", cwd: process.cwd(), mode: "write" });

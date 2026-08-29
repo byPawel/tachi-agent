@@ -218,6 +218,7 @@ export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string
       "--output-format", "json",
       "--sandbox", mode === "write" ? "workspace" : "read-only",
       "--no-subagents",
+      "--disallowed-tools", "Agent",
       "--max-turns", String(maxTurns),
     ];
     if (mode === "write") argv.push("--always-approve");

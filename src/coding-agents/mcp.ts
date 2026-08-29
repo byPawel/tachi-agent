@@ -6,6 +6,7 @@ import {
   runCodingAgent,
   resolveCodingCwd,
   writeAuthorized,
+  type CodingAgentName,
   type CodingAgentResult,
   type CodingAgentProgress,
   type RunCodingAgentArgs,
@@ -120,12 +121,14 @@ export async function runCodingAgentHandler(
       }, claimed);
     }
 
+    const enterHint = result.sessionId ? enterSessionCommand(result.agent, result.sessionId) : undefined;
     const header = [
       `agent: ${identity}`,
       result.harness ? `harness: ${result.harness}` : "",
       `mode: ${result.mode}`,
       `workspace: ${result.isolated ? "isolated worktree" : result.cwd}`,
       result.sessionId ? `session: ${result.sessionId}` : "",
+      enterHint ? `enter: ${enterHint}` : "",
       reportToDokoro ? `handoff: Dokoro → ${args.targetAgent ?? "claude-code"}` : "",
     ].filter(Boolean).join(" · ") + leaseWarning;
     const trace = result.trace?.length
@@ -158,6 +161,16 @@ export async function runCodingAgentHandler(
   }
 }
 
+// Workers are headless one-shots that cannot be entered mid-run; these CLIs can
+// reopen the finished worker session as an interactive one. Gemini and Hermes
+// have no session-resume affordance, so they get no hint.
+function enterSessionCommand(agent: CodingAgentName, sessionId: string): string | undefined {
+  if (agent === "grok") return `grok -r ${sessionId}`;
+  if (agent === "codex") return `codex resume ${sessionId}`;
+  if (agent === "claude") return `claude -r ${sessionId}`;
+  return undefined;
+}
+
 export function registerCodingAgentTool(server: McpServer, runtime: AgentRuntime): void {
   server.registerTool(
     "run_coding_agent",
@@ -165,13 +178,14 @@ export function registerCodingAgentTool(server: McpServer, runtime: AgentRuntime
       title: "Run external coding agent",
       description:
         "Run Codex CLI, Grok CLI, Gemini CLI, headless Claude Code, full Hermes Agent, or an OpenRouter " +
-        "model as a coding worker. " +
+        "model as a bounded coding worker: no subagents, review mode is the default, write mode is env-gated. " +
         "Returns the result directly to the caller and, by default, records a directed Dokoro handoff. " +
         "Use plannedFiles from a Superpowers task to acquire advisory leases before any edits. " +
         "Review mode is read-only for Codex/Grok/Claude and worktree-isolated for Hermes/Gemini; the " +
         "openrouter agent follows whichever local harness drives it (hermes by default — worktree-isolated; " +
         "codex via TACHI_OPENROUTER_HARNESS — read-only, in place) and reports it back as `harness`. " +
-        "Write mode must be explicit.",
+        "Write mode must be explicit. " +
+        "For full-power Grok inside Claude Code use the grok-build plugin — this tool is the coordinated bounded lane.",
       inputSchema: {
         agent: z.enum(["codex", "grok", "hermes", "openrouter", "gemini", "claude"]),
         task: z.string().min(1).max(200_000),

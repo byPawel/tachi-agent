@@ -269,6 +269,10 @@ The `gemini` worker runs Google's Gemini CLI headless (`gemini -p … --output-f
 
 The `claude` worker runs headless Claude Code (`claude -p … --output-format json --strict-mcp-config`). Review mode uses `--permission-mode plan` and returns the extracted plan; write mode (gated) uses `--permission-mode acceptEdits` — headless runs deny Bash-class calls instead of prompting, so a degraded run is flagged with `⚠ N tool call(s) denied`. Credentials: `ANTHROPIC_API_KEY` or an existing `claude` login under `~/.claude*`. Override the binary with `CLAUDE_CLI`.
 
+### Billing
+
+Grok workers authenticate with the grok.com login session by default and bill the SuperGrok subscription pool — session auth takes precedence over `XAI_API_KEY` (verified live 2026-08-29). Codex workers bill the ChatGPT-plan login the same way. To force API billing for grok workers, provide `XAI_API_KEY` and point `GROK_HOME` at an isolated directory with no session file.
+
 ### Using tachi-agent from other CLIs (vice versa)
 
 `tachi-agent-mcp` is a standard stdio MCP server, so the same `run_coding_agent` tool works from Codex CLI, Gemini CLI, or Grok CLI — including delegating a task to headless Claude Code (`agent: "claude"`). Registration snippets:
