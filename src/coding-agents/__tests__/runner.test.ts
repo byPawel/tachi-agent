@@ -23,6 +23,8 @@ afterEach(() => {
   delete process.env.HERMES_CLI;
   delete process.env.GEMINI_CLI;
   delete process.env.GEMINI_API_KEY;
+  delete process.env.CLAUDE_CLI;
+  delete process.env.ANTHROPIC_API_KEY;
   delete process.env.XAI_API_KEY;
   delete process.env.OPENROUTER_MODEL;
   delete process.env.TACHI_OPENROUTER_CODING_MODEL;
@@ -96,6 +98,23 @@ describe("buildCodingAgentCommand", () => {
     const spec = buildCodingAgentCommand({ agent: "gemini", task: "fix it", cwd: CWD, mode: "write" });
     expect(spec.args).toContain("--yolo");
     expect(spec.args).not.toContain("--approval-mode");
+  });
+
+  it("builds claude review argv in plan permission mode with strict mcp config", () => {
+    const spec = buildCodingAgentCommand({ agent: "claude", task: "review src", cwd: CWD, mode: "review", maxTurns: 12, model: "claude-sonnet-5" });
+    expect(spec.command).toBe("claude");
+    expect(spec.args).toEqual(expect.arrayContaining([
+      "-p", "review src", "--output-format", "json",
+      "--permission-mode", "plan", "--strict-mcp-config",
+      "--max-turns", "12", "--model", "claude-sonnet-5",
+    ]));
+    expect(spec.args).not.toContain("acceptEdits");
+  });
+
+  it("claude write mode uses acceptEdits and keeps user-config isolation", () => {
+    const spec = buildCodingAgentCommand({ agent: "claude", task: "fix it", cwd: CWD, mode: "write" });
+    expect(spec.args).toEqual(expect.arrayContaining(["--permission-mode", "acceptEdits", "--strict-mcp-config"]));
+    expect(spec.args).not.toContain("plan");
   });
 });
 
@@ -265,6 +284,62 @@ describe("gemini worker execution", () => {
       worktree,
     )).rejects.toThrow(/quota exhausted/);
     expect(worktree).not.toHaveBeenCalled();
+  });
+});
+
+describe("claude worker execution", () => {
+  const claudeEnv = () => {
+    process.env.CLAUDE_CLI = process.execPath;
+    process.env.ANTHROPIC_API_KEY = "test-key";
+  };
+
+  it("review mode extracts the plan from ExitPlanMode denials", async () => {
+    claudeEnv();
+    const envelope = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: "Claude requested permissions to exit plan mode, but you haven't granted it.",
+      session_id: "sess-42",
+      permission_denials: [
+        { tool_name: "Bash", tool_input: { command: "ls" } },
+        { tool_name: "ExitPlanMode", tool_input: { plan: "## Plan\n1. Look\n2. Report" } },
+      ],
+    });
+    const result = await runCodingAgent(
+      { agent: "claude", task: "plan a refactor", cwd: CWD },
+      async () => ok(envelope),
+    );
+    expect(result.answer).toBe("## Plan\n1. Look\n2. Report");
+    expect(result.sessionId).toBe("sess-42");
+  });
+
+  it("write mode surfaces denied tool calls as a degradation warning", async () => {
+    claudeEnv();
+    const envelope = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: "Edited 2 files. Could not run the test suite.",
+      permission_denials: [
+        { tool_name: "Bash", tool_input: { command: "npm test" } },
+        { tool_name: "WebFetch", tool_input: {} },
+      ],
+    });
+    const result = await runCodingAgent(
+      { agent: "claude", task: "fix and test", cwd: CWD, mode: "write" },
+      async () => ok(envelope),
+    );
+    expect(result.answer).toContain("Edited 2 files.");
+    expect(result.answer).toMatch(/2 tool call/);
+    expect(result.answer).toMatch(/denied/);
+  });
+
+  it("fails closed on error envelopes", async () => {
+    claudeEnv();
+    const envelope = JSON.stringify({ type: "result", is_error: true, result: "credit balance too low" });
+    await expect(runCodingAgent(
+      { agent: "claude", task: "t", cwd: CWD },
+      async () => ok(envelope),
+    )).rejects.toThrow(/credit balance too low/);
   });
 });
 

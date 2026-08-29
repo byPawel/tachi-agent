@@ -15,6 +15,23 @@ describe("gemini worker env", () => {
   });
 });
 
+describe("claude worker env", () => {
+  it("forwards only the Anthropic key and strips Claude Code session markers", () => {
+    const env = buildWorkerEnv("claude", {
+      PATH: "/bin",
+      ANTHROPIC_API_KEY: "sk",
+      CLAUDECODE: "1",
+      OPENROUTER_API_KEY: "leak-me-not",
+    });
+    expect(env.ANTHROPIC_API_KEY).toBe("sk");
+    // CLAUDECODE must not reach the worker — the nested-launch brake is
+    // replaced by the TACHI_CODING_DEPTH stamp.
+    expect(env.CLAUDECODE).toBeUndefined();
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.TACHI_CODING_DEPTH).toBe("1");
+  });
+});
+
 const base = {
   PATH: "/usr/bin", HOME: "/home/dev", TERM: "xterm",
   OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key",

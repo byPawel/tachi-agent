@@ -66,4 +66,20 @@ describe("preflightCodingAgent", () => {
     }));
     expect(r.ok).toBe(true);
   });
+
+  it("claude fails closed without creds and names the fix", async () => {
+    const r = await preflightCodingAgent("claude", "claude", deps());
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/ANTHROPIC_API_KEY/);
+  });
+
+  it("claude passes with ANTHROPIC_API_KEY or a saved login", async () => {
+    expect((await preflightCodingAgent("claude", "claude", deps({ env: { ANTHROPIC_API_KEY: "sk" } }))).ok).toBe(true);
+    expect((await preflightCodingAgent("claude", "claude", deps({
+      fileExists: async (p) => p.endsWith(".claude.json"),
+    }))).ok).toBe(true);
+    expect((await preflightCodingAgent("claude", "claude", deps({
+      fileExists: async (p) => p.endsWith(".claude"),
+    }))).ok).toBe(true);
+  });
 });

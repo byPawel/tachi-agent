@@ -4,9 +4,10 @@ import path from "node:path";
 import { buildWorkerEnv, type WorkerAgentName } from "./worker-env.js";
 import { preflightCodingAgent, type PreflightDeps } from "./preflight.js";
 import { parseGeminiJson, reviewGuard } from "./gemini-parse.js";
+import { parseClaudeEnvelope } from "./claude-parse.js";
 import { createReviewWorktree, type ReviewWorktree } from "./review-worktree.js";
 
-export type CodingAgentName = "codex" | "grok" | "hermes" | "openrouter" | "gemini";
+export type CodingAgentName = "codex" | "grok" | "hermes" | "openrouter" | "gemini" | "claude";
 export type CodingAgentMode = "review" | "write";
 export type CodingAgentVisibility = "final" | "trace" | "live";
 export type CodingAgentProgressKind =
@@ -144,6 +145,21 @@ export function buildCodingAgentCommand(args: RunCodingAgentArgs & { cwd: string
     else argv.push("--approval-mode", "plan");
     if (args.model?.trim()) argv.push("-m", args.model.trim());
     return { command: envCommand("gemini"), args: argv, cwd: args.cwd, env: buildWorkerEnv("gemini", process.env) };
+  }
+
+  if (args.agent === "claude") {
+    const argv = [
+      "-p", args.task,
+      "--output-format", "json",
+      // Never load the user-scope ~/.claude MCP config: it could re-mount
+      // tachi-agent-mcp and recurse around the env marker, or fire user hooks
+      // in the worker cwd.
+      "--strict-mcp-config",
+      "--max-turns", String(maxTurns),
+      "--permission-mode", mode === "write" ? "acceptEdits" : "plan",
+    ];
+    if (args.model?.trim()) argv.push("--model", args.model.trim());
+    return { command: envCommand("claude"), args: argv, cwd: args.cwd, env: buildWorkerEnv("claude", process.env) };
   }
 
   if (args.agent === "grok") {
@@ -457,6 +473,24 @@ function parseGemini(stdout: string, mode: CodingAgentMode): { answer: string; t
   return { answer: parsed.response ?? stdout.trim(), trace: [] };
 }
 
+function parseClaudeResult(stdout: string, mode: CodingAgentMode): { answer: string; trace: CodingAgentProgress[]; sessionId?: string } {
+  const parsed = parseClaudeEnvelope(stdout);
+  if (parsed.isError) {
+    throw new Error(`claude worker error: ${concise(parsed.text ?? parsed.raw, 8_000)}`);
+  }
+  const answer = parsed.text ?? stdout.trim();
+  // Headless acceptEdits denies Bash-class calls rather than prompting; a
+  // write task that hit denials completed only partially — say so.
+  const degraded = mode === "write" && parsed.deniedCalls > 0
+    ? `\n\n⚠ ${parsed.deniedCalls} tool call(s) denied by headless permission limits — the task may be incomplete.`
+    : "";
+  return {
+    answer: answer + degraded,
+    trace: [],
+    ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+  };
+}
+
 export async function runCodingAgent(
   args: RunCodingAgentArgs,
   executor: CommandExecutor = executeCommand,
@@ -542,7 +576,9 @@ export async function runCodingAgent(
         ? parseGrok(processResult.stdout)
         : args.agent === "gemini"
           ? parseGemini(processResult.stdout, mode)
-          : { answer: processResult.stdout.trim(), trace: [] as CodingAgentProgress[] };
+          : args.agent === "claude"
+            ? parseClaudeResult(processResult.stdout, mode)
+            : { answer: processResult.stdout.trim(), trace: [] as CodingAgentProgress[] };
     const provider = args.agent === "openrouter" ? "openrouter" : args.provider?.trim();
     publish({ kind: "status", message: `${args.agent} coding agent completed successfully.` });
     await progressQueue;

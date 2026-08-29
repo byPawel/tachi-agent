@@ -344,6 +344,17 @@ describe("doctor: coding agent checks", () => {
     expect(codex?.critical).toBe(false); // informational, never blocks the CLI
   });
 
+  it("probes claude and reports the missing credential actionably", async () => {
+    const results = await checkCodingAgents(
+      makeDeps({ env: { TACHI_CODING_AGENTS: "claude" } }),
+    );
+    const claude = results.find((r) => r.name === "coding:claude");
+    expect(claude).toBeDefined();
+    expect(claude?.ok).toBe(false); // no ANTHROPIC_API_KEY and no HOME in deps env
+    expect(claude?.detail).toMatch(/not found on PATH|ANTHROPIC_API_KEY/);
+    expect(claude?.critical).toBe(false);
+  });
+
   it("probes gemini and reports the missing binary or credential actionably", async () => {
     const results = await checkCodingAgents(
       makeDeps({ env: { TACHI_CODING_AGENTS: "gemini" } }),

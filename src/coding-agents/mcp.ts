@@ -160,12 +160,14 @@ export function registerCodingAgentTool(server: McpServer, runtime: AgentRuntime
     {
       title: "Run external coding agent",
       description:
-        "Run Codex CLI, Grok CLI, Gemini CLI, full Hermes Agent, or a Hermes-powered OpenRouter model as a coding worker. " +
-        "Returns the result directly to Claude Code and, by default, records a directed Dokoro handoff. " +
+        "Run Codex CLI, Grok CLI, Gemini CLI, headless Claude Code, full Hermes Agent, or a Hermes-powered " +
+        "OpenRouter model as a coding worker. " +
+        "Returns the result directly to the caller and, by default, records a directed Dokoro handoff. " +
         "Use plannedFiles from a Superpowers task to acquire advisory leases before any edits. " +
-        "Review mode is read-only for Codex/Grok and worktree-isolated for Hermes/OpenRouter/Gemini; write mode must be explicit.",
+        "Review mode is read-only for Codex/Grok/Claude and worktree-isolated for Hermes/OpenRouter/Gemini; " +
+        "write mode must be explicit.",
       inputSchema: {
-        agent: z.enum(["codex", "grok", "hermes", "openrouter", "gemini"]),
+        agent: z.enum(["codex", "grok", "hermes", "openrouter", "gemini", "claude"]),
         task: z.string().min(1).max(200_000),
         cwd: z.string().optional().describe("Workspace under TACHI_CODING_ROOTS (default MCP server cwd)"),
         model: z.string().optional().describe("Per-run model override; required for the openrouter agent"),
