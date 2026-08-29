@@ -225,7 +225,7 @@ Codex uses `codex exec --json`, so its public JSONL events can report reasoning 
 
 ### OpenRouter coding agents
 
-The `openrouter` worker is the full Hermes Agent coding harness with an OpenRouter model selected per run. It keeps Hermes file, terminal, and skill toolsets, checkpoints destructive file operations, tags the session as a tool integration, and uses a git worktree by default. Review mode always stays isolated; pass `isolate: false` only for an explicitly authorized write task that must modify the requested checkout.
+The `openrouter` worker runs an OpenRouter model of your choice through a private, swappable coding harness (see harness selection below). With the default `hermes` harness it keeps Hermes file, terminal, and skill toolsets, checkpoints destructive file operations, tags the session as a tool integration, and uses a git worktree by default; review mode always stays isolated, and `isolate: false` is honored only for an explicitly authorized write task that must modify the requested checkout.
 
 `agent: "openrouter"` is the **only caller-visible choice** — it is the generic multi-provider lane: any OpenRouter model (GLM, Kimi, DeepSeek, Qwen, …) runs as a coding worker through this one stable adapter, with no per-vendor worker types.
 

@@ -45,7 +45,7 @@ Harness metadata must be sufficient for the runner to:
 - Review is safe by default. Hermes review keeps its forced worktree. Codex review uses Codex's `read-only` sandbox.
 - Write remains gated by `TACHI_CODING_ALLOW_WRITE=1` before harness selection.
 - Tasks remain positional arguments with no shell interpolation and retain the leading-dash rejection.
-- Workers receive only OS basics, `OPENROUTER_API_KEY`, model hints, recursion marker, and the selected harness's binary/config variables.
+- Workers receive only OS basics, `OPENROUTER_API_KEY`, model hints, recursion marker, and the harness binary/config variables. *(Amended 2026-08-29: the implementation uses one static union allowlist for the `openrouter` lane — both harnesses' binary variables are forwarded regardless of the selected harness. The selector is read from the environment at spawn time, a static per-harness split would complicate `buildWorkerEnv` for no secret-exposure benefit — `HERMES_CLI`/`CODEX_CLI`/`CODEX_HOME`/`OPENROUTER_BASE_URL` are paths and URLs, not credentials — and the plan's Task 2 prescribed the union explicitly. Cross-review flagged the mismatch; the spec wording, not the code, was wrong.)*
 - `TACHI_CODING_DEPTH=1`, timeout process-tree termination, root allowlists, concurrency caps, Dokoro leases, and result-size limits remain unchanged.
 - A missing or invalid harness value fails closed with an actionable error.
 - No API key value is written to repository files or command arguments.
