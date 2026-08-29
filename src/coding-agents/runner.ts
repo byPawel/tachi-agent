@@ -499,7 +499,7 @@ function stringValue(value: unknown): string | undefined {
 function parseGrok(stdout: string): { answer: string; trace: CodingAgentProgress[]; sessionId?: string } {
   try {
     const data = JSON.parse(stdout) as Record<string, any>;
-    const answer = stringValue(data.result) ?? stringValue(data.response) ?? stringValue(data.message) ?? stringValue(data.content);
+    const answer = stringValue(data.result) ?? stringValue(data.text) ?? stringValue(data.response) ?? stringValue(data.message) ?? stringValue(data.content);
     const sessionId = typeof data.sessionId === "string" ? data.sessionId : undefined;
     return { answer: answer ?? stdout.trim(), trace: [], ...(sessionId ? { sessionId } : {}) };
   } catch {

@@ -183,6 +183,17 @@ describe("runCodingAgent", () => {
     expect(result.sessionId).toBe("grok-1");
   });
 
+  it("extracts the live grok envelope's text field", async () => {
+    process.env.GROK_CLI = process.execPath;
+    process.env.XAI_API_KEY = "test-key";
+    const result = await runCodingAgent(
+      { agent: "grok", task: "x", cwd: CWD },
+      async () => ok(JSON.stringify({ text: "pong", stopReason: "end_turn", sessionId: "grok-2" })),
+    );
+    expect(result.answer).toBe("pong");
+    expect(result.sessionId).toBe("grok-2");
+  });
+
   it("surfaces non-zero CLI exits", async () => {
     await expect(runCodingAgent(
       { agent: "codex", task: "x", cwd: CWD },
