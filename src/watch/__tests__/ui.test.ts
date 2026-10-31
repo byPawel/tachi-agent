@@ -370,3 +370,14 @@ describe("link spans", () => {
     expect(linkSpans(line)).toEqual([{ from: 3, to: 7, url: "https://a.dev/x" }]);
   });
 });
+
+describe("human time", () => {
+  it("formats ISO timestamps with weekday, local time, part of day and age", async () => {
+    const { humanTime } = await import("../ui.js");
+    const iso = "2026-07-01T21:51:45.059Z";
+    const out = humanTime(iso, Date.parse("2026-10-31T02:00:00Z"));
+    expect(out).toMatch(/^(Wed|Thu) \d{1,2} Jul 2026 · \d{2}:\d{2} (☼ morning|☀ midday|◑ afternoon|☾ evening|✦ night) · 4 months ago$/);
+    expect(humanTime("agent-260701215145")).toBe("agent-260701215145");
+    expect(humanTime("2026-07-01", Date.parse("2026-07-03T00:00:00Z"))).toMatch(/Jul 2026 · 2 days ago/);
+  });
+});

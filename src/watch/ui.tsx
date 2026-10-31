@@ -846,6 +846,31 @@ export function noteName(file: string): string {
   return m ? `${m[4]} · ${m[1]} ${m[2]}:${m[3]}` : base;
 }
 
+/**
+ * An ISO timestamp as people read it, in local time: "Wed 1 Jul 2026 · 23:51 ☾ evening · 4 months ago".
+ * Anything that is not a full ISO date-time comes back unchanged.
+ */
+export function humanTime(value: string, now = Date.now()): string {
+  const m = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(value.trim());
+  if (!m) return value;
+  const d = new Date(value.trim());
+  if (Number.isNaN(d.getTime())) return value;
+  const dateOnly = !/[T ]\d{2}:\d{2}/.test(value);
+  const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).replace(",", "");
+  const ago = (() => {
+    const s = Math.round((now - d.getTime()) / 1000);
+    const a = Math.abs(s);
+    const unit = a < 3600 ? [Math.round(a / 60), "minute"] : a < 86400 ? [Math.round(a / 3600), "hour"] : a < 86400 * 45 ? [Math.round(a / 86400), "day"] : a < 86400 * 365 ? [Math.round(a / (86400 * 30)), "month"] : [Math.round(a / (86400 * 365)), "year"];
+    const txt = `${unit[0]} ${unit[1]}${unit[0] === 1 ? "" : "s"}`;
+    return a < 60 ? "just now" : s >= 0 ? `${txt} ago` : `in ${txt}`;
+  })();
+  if (dateOnly) return `${day} · ${ago}`;
+  const h = d.getHours();
+  const part = h >= 5 && h < 12 ? "☼ morning" : h >= 12 && h < 14 ? "☀ midday" : h >= 14 && h < 18 ? "◑ afternoon" : h >= 18 && h < 22 ? "☾ evening" : "✦ night";
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return `${day} · ${time} ${part} · ${ago}`;
+}
+
 /** YAML front matter ("---\nkey: value\n---") → a PROPERTIES block: dimmed keys, unquoted values. */
 export function frontMatter(text: string): { props: Array<[string, string]>; body: string } {
   const m = /^\s*---\s*\n([\s\S]*?)\n---\s*\n?/.exec(text);
@@ -874,7 +899,7 @@ function MemoryView({ cwd, files, sel, off, width, rows, dokoroSearch, focus, fo
   const pill = (k: string, v: string) => /^(status|state|type|priority)$/i.test(k) && v.length < 24 ? `\x1b[48;2;42;31;10m\x1b[38;2;227;179;65m ${v} \x1b[39m\x1b[48;2;22;27;34m` : v;
   const propLines = props.length
     ? [
-        ...props.flatMap(([k, v]) => wrap(v, Math.max(10, innerW - 4 - keyW)).map((w, i) => tint(` ${i ? " ".repeat(keyW) : `\x1b[38;2;139;148;158m${k.padEnd(keyW)}\x1b[39m`}  ${i ? w : pill(k, w)}`))),
+        ...props.map(([k, v0]) => [k, humanTime(v0)] as const).flatMap(([k, v]) => wrap(v, Math.max(10, innerW - 4 - keyW)).map((w, i) => tint(` ${i ? " ".repeat(keyW) : `\x1b[38;2;139;148;158m${k.padEnd(keyW)}\x1b[39m`}  ${i ? w : pill(k, w)}`))),
         "",
       ]
     : [];
@@ -1140,6 +1165,10 @@ function App({ controller }: { controller: WatchController }) {
   // a drag selects text in place: copied at once, and attached to the next question until Esc
   const [dragTo, setDragTo] = useState<{ x: number; y: number } | null>(null);
   const [attached, setAttached] = useState<string | null>(null);
+  // solo chat: only your questions and the brain's answers — the brain's running notes hidden
+  const [chatSolo, setChatSolo] = useState(false);
+  // a long proposal is reviewed whole before it can be sent: the first ^S expands it
+  const [reviewing, setReviewing] = useState<string | null>(null);
   const [, setFoldTick] = useState(0);
   const [memFolded, setMemFolded] = useState<Set<string>>(() => new Set());
   useEffect(() => {
@@ -1288,7 +1317,9 @@ function App({ controller }: { controller: WatchController }) {
   const cardW = size.cols - listW - chatW - (threeCol ? 4 : 3);
   // the proposal is what you approve: 3 lines visible (never 1), the rest via ctrl+e
   const proposalLines = s.proposal ? wrap(s.proposal, width - 4) : [];
-  const proposalShown = proposalLines.length > 3 ? [...proposalLines.slice(0, 2), `${proposalLines[2].slice(0, Math.max(0, width - 22))}… (ctrl+e: all)`] : proposalLines;
+  // under review the box shows every line (proposals are capped, so they fit); else 3 lines
+  const proposalShown = reviewing && reviewing === s.proposal ? proposalLines
+    : proposalLines.length > 3 ? [...proposalLines.slice(0, 2), `${proposalLines[2].slice(0, Math.max(0, width - 26))}… (^S: read all)`] : proposalLines;
   const proposalRows = s.proposal ? 3 + proposalShown.length : 0;
   // the input wraps onto up to 3 lines (the newest text stays visible)
   const promptLabel = editing ? "edit › " : view === "prompts" ? "task › " : view === "memory" ? "ask › " : s.asking ? "ask (answering…) › " : view === "chat" ? "ask › " : view === "home" ? "ask › " : "ask about this call › ";
@@ -1314,7 +1345,8 @@ function App({ controller }: { controller: WatchController }) {
     // a proposal longer than its 3 visible lines is never sent unseen: the first ^S opens it whole
     if (key.ctrl && ch === "s") return did(() => {
       if (Date.now() - shownAt <= 1000) return;
-      if (proposalLines.length > 3) { setEditing(true); setInput(s.proposal!); return; }
+      if (proposalLines.length > 3 && reviewing !== s.proposal) { setReviewing(s.proposal!); return; }
+      setReviewing(null);
       controller.send(s.proposal!);
     });
     if (key.escape && !input) return did(() => controller.cancelProposal());
@@ -1327,6 +1359,7 @@ function App({ controller }: { controller: WatchController }) {
 
   const globalLayer: Layer = (ch, key) => {
     if (key.ctrl && ch === "x") return did(() => setSelectMode((v) => !v));
+    if (key.ctrl && ch === "n" && (view === "chat" || threeCol)) return did(() => setChatSolo((v) => !v));
     if (ch === "?" && !typing && !searching) return did(() => setHelp(true));
     if (key.ctrl && ch === "t") return did(() => setCompactPref(!dense));
     if (key.ctrl && ch === "g") return did(() => setView("home"));
@@ -1560,6 +1593,8 @@ function App({ controller }: { controller: WatchController }) {
       const sec = at(/[▾▸] (STEPS|INPUT|OUTPUT)\b/);
       if (sec) return did(() => { foldedSections.has(sec[1]) ? foldedSections.delete(sec[1]) : foldedSections.add(sec[1]); setFoldTick((t) => t + 1); });
       if (at(/[▾▸] behind the scenes/)) return did(() => setExpanded((e) => !e));
+      const tagAt = /( SOLO | ALL ) \^N/.exec(row);
+      if (tagAt && Math.abs(x - 1 - Array.from(row.slice(0, tagAt.index)).length - 3) <= 4) return did(() => setChatSolo((v) => !v));
       const grp = view === "memory" ? at(/[▾▸] (PROJECT|CLAUDE MEMORY|DOKORO)\b/) : null;
       if (grp) return did(() => setMemFolded((f) => { const n = new Set(f); n.has(grp[1]) ? n.delete(grp[1]) : n.add(grp[1]); return n; }));
     }
@@ -1629,7 +1664,7 @@ function App({ controller }: { controller: WatchController }) {
   const chatNode = (w: number, room: number): ReactNode => {
     // the search filters the chat only when CHAT is the tab you searched in (not the side column)
     const words = queries.chat.toLowerCase().split(/\s+/).filter(Boolean);
-    const chatCards = s.cards.filter((c) => (c.type === "answer" || c.type === "note") && (!words.length || words.every((x) => `${c.input ?? ""} ${c.output ?? ""} ${c.cite ?? ""}`.toLowerCase().includes(x))));
+    const chatCards = s.cards.filter((c) => (c.type === "answer" || (c.type === "note" && !chatSolo)) && (!words.length || words.every((x) => `${c.input ?? ""} ${c.output ?? ""} ${c.cite ?? ""}`.toLowerCase().includes(x))));
     const allRaw = chatLines(chatCards, s.asking, w - 1, nowMs);
     // compact: no spacer lines, no running "now" commentary
     const all = dense ? allRaw.filter((l) => l.text !== "" && !l.text.startsWith("◌") && !/^\s*\+\d+ earlier/.test(l.text)) : allRaw;
@@ -1881,7 +1916,12 @@ function App({ controller }: { controller: WatchController }) {
         </Box>
         {threeCol ? (
           <Box flexDirection="column" width={chatW} flexShrink={0} overflow="hidden" borderStyle={focusPane === "chat" ? "bold" : "round"} borderColor={focusPane === "chat" ? focusColor(THEME.chat) : "#30363d"} paddingX={1}>
-            {focusPane === "chat" ? <Text backgroundColor={THEME.chat} color="#0d1117" bold>{" CHAT · SECOND BRAIN "}</Text> : <Text bold color={THEME.chat}>CHAT · SECOND BRAIN</Text>}
+            <Text wrap="truncate-end">
+              {focusPane === "chat" ? <Text backgroundColor={THEME.chat} color="#0d1117" bold>{" CHAT · SECOND BRAIN "}</Text> : <Text bold color={THEME.chat}>CHAT · SECOND BRAIN</Text>}
+              <Text>{"  "}</Text>
+              {chatSolo ? <Text backgroundColor={THEME.chat} color="#0d1117" bold>{" SOLO "}</Text> : <Text backgroundColor={THEME.tagBg} color={THEME.muted}>{" ALL "}</Text>}
+              <Text color={THEME.muted}>{" ^N"}</Text>
+            </Text>
             {chatNode(chatW - 4, bodyRows - 3)}
           </Box>
         ) : null}
@@ -1916,7 +1956,7 @@ function App({ controller }: { controller: WatchController }) {
       <Box flexDirection="column" flexGrow={1} overflow="hidden">{body}</Box>
       {s.proposal ? (
         <Box borderStyle="round" borderColor="#e3b341" paddingX={1} flexDirection="column" flexShrink={0}>
-          <Text wrap="truncate-end"><Text bold color="#e3b341">⚠ to Claude?</Text><Text dimColor>{editing ? "  Enter send · Esc cancel" : "  ^S send · ^E edit · Esc drop"}</Text></Text>
+          <Text wrap="truncate-end"><Text bold color="#e3b341">⚠ to Claude?</Text><Text dimColor>{editing ? "  Enter send · Esc cancel" : reviewing === s.proposal ? "  all of it is shown · ^S send · ^E edit · Esc drop" : proposalLines.length > 3 ? "  ^S read all · ^E edit · Esc drop" : "  ^S send · ^E edit · Esc drop"}</Text></Text>
           {proposalShown.map((l, i) => <Text key={i}>{l || " "}</Text>)}
         </Box>
       ) : null}
@@ -1961,7 +2001,7 @@ function App({ controller }: { controller: WatchController }) {
           : view === "chat"
           ? size.cols < 80
             ? ` · Tab · ↑↓${followups.length ? " · 1-3" : ""} · Esc home`
-            : ` · Tab calls · ↑↓ scroll${followups.length ? " · 1-3 follow-up" : ""} · @claude <text> → Claude · Esc home · ^C quit`
+            : ` · ${chatSolo ? "SOLO · " : ""}^N ${chatSolo ? "show notes" : "solo"} · ↑↓ scroll${followups.length ? " · 1-3 follow-up" : ""} · @claude <text> → Claude · Esc home`
           : size.cols < 80
             ? " · Tab · ↑↓ · ^F · Esc home"
             : wide

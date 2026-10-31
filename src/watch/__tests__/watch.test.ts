@@ -346,3 +346,11 @@ describe("security hardening", () => {
     expect(link("t", "https://a.dev/\x1bx")).toBe("t");
   });
 });
+
+describe("proposal hygiene", () => {
+  it("strips escapes, controls and bidi/zero-width chars, and caps the length", async () => {
+    const { cleanProposal, PROPOSAL_MAX } = await import("../watch.js");
+    expect(cleanProposal("run \x1b[8mhidden\x1b[0m tests‮​\x07")).toBe("run hidden tests");
+    expect(cleanProposal("x".repeat(PROPOSAL_MAX + 50)).length).toBe(PROPOSAL_MAX);
+  });
+});

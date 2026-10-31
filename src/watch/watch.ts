@@ -26,6 +26,22 @@ import type { Memory } from "../types.js";
 
 const WINDOW = 60;
 
+/** The most a proposal to Claude may hold: it must fit on screen whole when you approve it. */
+export const PROPOSAL_MAX = 800;
+
+/**
+ * What you approve is exactly what is sent: no ANSI, no control characters, no bidi or
+ * zero-width format characters (they can hide or reorder text), capped to PROPOSAL_MAX.
+ */
+export function cleanProposal(text: string): string {
+  const t = text
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b./g, "")
+    .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "")
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, "")
+    .trim();
+  return t.length > PROPOSAL_MAX ? `${t.slice(0, PROPOSAL_MAX - 1)}…` : t;
+}
+
 export interface WatchArgs extends Partial<WatchLaunch> {
   open: boolean;
   brain?: string;
@@ -333,7 +349,7 @@ export class WatchController {
       );
       const result = parseReview(await this.brain.ask(CALL_REVIEW_SYSTEM_PROMPT, prompt, this.controller.signal));
       for (const n of result.notes) this.say("note", n.text, n.source, call.key);
-      if (result.flag) this.set({ proposal: result.flag });
+      if (result.flag) this.set({ proposal: cleanProposal(result.flag) });
       if (!result.notes.length && !result.flag) this.say("status", `✓ ${call.title}: nothing contradicts memory`, undefined, call.key);
     } catch (err) {
       this.say("status", `review failed: ${err instanceof Error ? err.message : err}`);
@@ -366,7 +382,7 @@ export class WatchController {
       const prompt = `${asked ? `What the user asked (first message, then latest):\n${asked}\n\n` : ""}${buildReviewPrompt(reason, this.recent, snippets, dokoro)}`;
       const result = parseReview(await this.brain.ask(WATCHER_SYSTEM_PROMPT, prompt, this.controller.signal));
       for (const n of result.notes) this.say("note", n.text, n.source);
-      if (result.flag) this.set({ proposal: result.flag });
+      if (result.flag) this.set({ proposal: cleanProposal(result.flag) });
     } catch (err) {
       this.say("status", `session review failed: ${err instanceof Error ? err.message : err}`);
     } finally {
@@ -463,7 +479,7 @@ export class WatchController {
     // your last real question — never a harness-injected turn (Stop hook, compaction notice…)
     const harness = /^(A session-scoped Stop hook|Stop hook feedback|This session is being continued|\[SYSTEM NOTIFICATION|Caveat:|<)/;
     const last = [...this.prompts].reverse().find((p) => !harness.test(p.text.trim()))?.text ?? "";
-    this.set({ proposal: techniqueMessage(t, task || last.replace(/\[Image[^\]]*\]/g, "").trim()) });
+    this.set({ proposal: cleanProposal(techniqueMessage(t, task || last.replace(/\[Image[^\]]*\]/g, "").trim())) });
   }
 
   // --- approval + commands ----------------------------------------------------
@@ -481,7 +497,7 @@ export class WatchController {
         // a failed send comes back as the proposal: ^S retries it, Esc drops it
         this.say("answer", `✗ send failed: ${err.message}`, "error", undefined, `/send ${text}`);
         this.say("status", "✗ send failed — ^S to retry, Esc to drop");
-        this.set({ proposal: text });
+        this.set({ proposal: cleanProposal(text) });
         return;
       }
       const id = /"id"\s*:\s*"([^"]+)"/.exec(stdout)?.[1];
