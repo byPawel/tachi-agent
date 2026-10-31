@@ -336,6 +336,22 @@ interface Line {
   bg?: string;
 }
 
+/** The MODELS tab's carousel: one model's answer at a time (jurors, panel members, council roles). */
+export function modelCarousel(it: Item, idx: number, width: number): Line[] {
+  const answered = it.models.filter((m) => m.type !== "thought" && (m.full ?? m.output));
+  if (answered.length < 2) return [];
+  const i = ((idx % answered.length) + answered.length) % answered.length;
+  const m = answered[i];
+  const lines: Line[] = [
+    { text: `◂ ${i + 1} / ${answered.length} ▸  ${shortModel(m.title)}${m.ms !== undefined ? `  ${(m.ms / 1000).toFixed(1)}s` : ""}`, color: "#79c0ff", bold: true },
+    { text: "click ◂ ▸ or press [ ] to flip between the answers", dim: true },
+    { text: "" },
+  ];
+  for (const l of renderMarkdown(readable(visibleOf(m.full ?? m.output ?? "")), width)) lines.push({ text: l, ansi: true });
+  lines.push({ text: "" });
+  return lines;
+}
+
 function detailLines(it: Item, width: number, reviewing: boolean, expanded = false): Line[] {
   const lines: Line[] = [];
   const push = (text: string, style: Omit<Line, "text"> = {}) => {
@@ -599,13 +615,20 @@ export function foldLines(lines: Line[], folded: Set<string>): Line[] {
   return out;
 }
 
-function detailFor(it: Item, width: number, reviewing: boolean, expanded = false): Line[] {
+function detailFor(it: Item, width: number, reviewing: boolean, expanded = false, modelIdx = 0): Line[] {
   if (!it.call) return [];
   const c = it.call;
-  const k = `${[...foldedSections].join(",")}|${plannerPhases.size}|${c.key}|${c.status}|${c.fullAnsi?.length ?? c.full?.length ?? c.output?.length ?? 0}|${it.models.map((m) => m.status).join("")}|${it.notes.length}|${reviewing}|${width}|${expanded}`;
+  const k = `${modelIdx}|${[...foldedSections].join(",")}|${plannerPhases.size}|${c.key}|${c.status}|${c.fullAnsi?.length ?? c.full?.length ?? c.output?.length ?? 0}|${it.models.map((m) => m.status).join("")}|${it.notes.length}|${reviewing}|${width}|${expanded}`;
   let lines = detailCache.get(k);
   if (!lines) {
-    lines = foldLines(detailLines(it, width, reviewing, expanded), foldedSections);
+    // the carousel opens the MODELS tab (tabLines puts lines after the STEPS header there)
+    const base = detailLines(it, width, reviewing, expanded);
+    const carousel = modelCarousel(it, modelIdx, width);
+    const stepsAt = base.findIndex((l) => l.section === "STEPS");
+    const withCarousel = !carousel.length ? base
+      : stepsAt >= 0 ? [...base.slice(0, stepsAt + 1), ...carousel, ...base.slice(stepsAt + 1)]
+      : [...base, { text: "MODELS", section: "STEPS", bold: true }, ...carousel];
+    lines = foldLines(withCarousel, foldedSections);
     if (detailCache.size > 200) detailCache.clear();
     detailCache.set(k, lines);
   }
@@ -1008,7 +1031,7 @@ function MemoryView({ cwd, files, sel, off, width, rows, dokoroSearch, focus, fo
 
 /** Every key, per tab — the help overlay renders from this so it cannot drift from what works. */
 export const KEYS: Record<View | "all", Array<[string, string]>> = {
-  all: [["Tab / Shift+Tab", "next / previous tab (HOME → CALLS → CHAT → PROMPTS → MEMORY)"], ["click", "a tab, a call, a file, a technique, a pane"], ["^Y", "copy the open call / file / last answer"], ["^P · ^K", "pin the open call to the top · export it as markdown (dokoro/daily)"], ["^O", "mark the open call, open another: compare side by side (Esc ends)"], ["^N", "solo chat: hide the brain's notes"], ["drag", "select text: copied, and attached to your next question (Esc drops)"], ["^X", "terminal select mode (Esc returns)"], ["click a link", "opens in Chrome (TACHI_BROWSER to change)"], ["Esc", "back out one layer — typed text, then the tab → HOME"], ["^F", "search this tab"], ["^T", "compact / normal density"], ["?", "this help"], ["^S · ^E", "send / edit the brain's proposal to Claude"], ["@claude <text>", "send your own text to Claude"], ["^C", "quit"]],
+  all: [["Tab / Shift+Tab", "next / previous tab (HOME → CALLS → CHAT → PROMPTS → MEMORY)"], ["click", "a tab, a call, a file, a technique, a pane"], ["^Y", "copy the open call / file / last answer"], ["^P · ^K", "pin the open call to the top · export it as markdown (dokoro/daily)"], ["^O", "mark the open call, open another: compare side by side (Esc ends)"], ["[ ]", "MODELS tab: flip between the models' answers"], ["^N", "solo chat: hide the brain's notes"], ["drag", "select text: copied, and attached to your next question (Esc drops)"], ["^X", "terminal select mode (Esc returns)"], ["click a link", "opens in Chrome (TACHI_BROWSER to change)"], ["Esc", "back out one layer — typed text, then the tab → HOME"], ["^F", "search this tab"], ["^T", "compact / normal density"], ["?", "this help"], ["^S · ^E", "send / edit the brain's proposal to Claude"], ["@claude <text>", "send your own text to Claude"], ["^C", "quit"]],
   home: [["↑↓", "open the calls"], ["1-3", "ask a suggested question"]],
   calls: [["←→", "split: focus list · card · chat (keys act on the focused pane)"], ["↑↓", "move in the focused pane (list: select · card: line · chat: scroll)"], ["g / G", "top / end of the focused pane (input empty)"], ["PgUp/PgDn", "scroll the card a page"], ["wheel", "scrolls the pane under the pointer"], ["^B", "behind the scenes (model calls)"], ["/label <name>", "name this question group"], ["/layout auto|split|stack", "columns"], ["Enter", "ask the brain about this call"]],
   chat: [["↑↓ PgUp/PgDn", "scroll — scrolling up pauses, ↓ to the end resumes"], ["1-3", "ask a follow-up"], ["Enter", "ask the brain"]],
@@ -1204,6 +1227,8 @@ function App({ controller }: { controller: WatchController }) {
   const [starred, setStarred] = useState<Set<string>>(() => new Set());
   // compare: the call marked with ^O shows beside the open one
   const [compareKey, setCompareKey] = useState<string | null>(null);
+  // MODELS tab carousel position
+  const [modelIdx, setModelIdx] = useState(0);
   const reviewAt = useRef(0);
   const [, setFoldTick] = useState(0);
   const [memFolded, setMemFolded] = useState<Set<string>>(() => new Set());
@@ -1345,7 +1370,7 @@ function App({ controller }: { controller: WatchController }) {
 
   // every card opens on OUTPUT
   const currentKey = current?.call?.key;
-  useEffect(() => setCardTab("OUTPUT"), [currentKey]);
+  useEffect(() => { setCardTab("OUTPUT"); setModelIdx(0); }, [currentKey]);
   const offKey = current?.call?.key ?? current?.loose?.key ?? "";
   const offset = offsets[offKey] ?? 0;
   const setOffset = (f: number | ((o: number) => number)) =>
@@ -1510,6 +1535,7 @@ function App({ controller }: { controller: WatchController }) {
       return askSuggestion(ch, key);
     },
     calls: (ch, key) => {
+      if (!typing && cardTab === "MODELS" && (ch === "[" || ch === "]")) return did(() => { setModelIdx((n) => n + (ch === "]" ? 1 : -1)); setOffset(0); });
       if (key.ctrl && ch === "o" && current?.call) {
         const k = current.call.key;
         return did(() => {
@@ -1690,6 +1716,13 @@ function App({ controller }: { controller: WatchController }) {
         const from = Array.from(row.slice(0, h.index)).length + 1;
         if (x >= from && x <= from + h[0].length - 1) return did(() => { setCardTab(t); setOffset(0); });
       }
+      const car = /◂ \d+ \/ \d+ ▸/.exec(row);
+      if (car) {
+        const from = Array.from(row.slice(0, car.index)).length + 1;
+        const w0 = Array.from(car[0]).length;
+        if (x >= from && x < from + 3) return did(() => { setModelIdx((n) => n - 1); setOffset(0); });
+        if (x > from + w0 - 4 && x <= from + w0) return did(() => { setModelIdx((n) => n + 1); setOffset(0); });
+      }
       const tagAt = /( SOLO | ALL ) \^N/.exec(row);
       if (tagAt && Math.abs(x - 1 - Array.from(row.slice(0, tagAt.index)).length - 3) <= 4) return did(() => setChatSolo((v) => !v));
       const grp = view === "memory" ? at(/[▾▸] (PROJECT|CLAUDE MEMORY|DOKORO)\b/) : null;
@@ -1831,8 +1864,8 @@ function App({ controller }: { controller: WatchController }) {
           { tool: c.title, status: c.status, ts: c.ts, ms: c.ms, input: c.inputFull ?? c.input, output: c.full ?? c.output }, w - 4)
       : [];
     const detailAll = council.length
-      ? [...council.map((text): Line => ({ text, ansi: true })), { text: "" } as Line, ...detailFor(it, w - 4, s.reviewingKey === c.key, expanded)]
-      : detailFor(it, w - 4, s.reviewingKey === c.key, expanded);
+      ? [...council.map((text): Line => ({ text, ansi: true })), { text: "" } as Line, ...detailFor(it, w - 4, s.reviewingKey === c.key, expanded, modelIdx)]
+      : detailFor(it, w - 4, s.reviewingKey === c.key, expanded, modelIdx);
     // tabs: the card shows one part at a time; it opens on OUTPUT
     const byTab = tabLines(detailAll);
     const tabCounts: Record<CardTab, number> = { OUTPUT: 0, INPUT: byTab.INPUT.filter((l) => l.text.trim() && !l.section).length, MODELS: it.models.length };

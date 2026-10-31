@@ -147,3 +147,29 @@ describe("card tabs", () => {
     expect(f2).not.toContain("beta answer");
   });
 });
+
+describe("models carousel", () => {
+  it("MODELS shows one juror answer at a time; ] flips to the next", async () => {
+    const now = Date.now();
+    const s = state();
+    s.cards = [
+      { key: "j1", type: "tool", via: "tachibot", tool: "jury", title: "tachibot · jury", source: "claude", depth: 0, status: "ok", ts: now - 9000, ms: 8000, input: "q", full: "JURY PANEL (3/3 responded)\n- A: grok\n\nVERDICT\nShip it." },
+      { key: "m1", type: "span", title: "openrouter:x-ai/grok-4.7", source: "tachibot", depth: 1, status: "ok", ts: now - 8800, ms: 3000, output: "GROK SAYS ship", full: "GROK SAYS ship" },
+      { key: "m2", type: "span", title: "openrouter:moonshotai/kimi-k3", source: "tachibot", depth: 1, status: "ok", ts: now - 8700, ms: 4000, output: "KIMI SAYS wait", full: "KIMI SAYS wait" },
+      { key: "m3", type: "span", title: "openai:gpt-6.1-sol", source: "tachibot", depth: 1, status: "ok", ts: now - 8600, ms: 5000, output: "SOL SAYS ship", full: "SOL SAYS ship" },
+    ] as never;
+    const f1 = await runWith(s, [TAB], 110, 34);
+    const rows = f1.split("\n");
+    const y = rows.findIndex((l) => / MODELS \d+ /.test(l));
+    expect(y).toBeGreaterThan(0);
+    const x = rows[y].indexOf(" MODELS") + 3;
+    const s2 = { ...s };
+    const f2 = await runWith(s2, [TAB, `\x1b[<0;${x};${y + 1}M`, "\x1b[<0;1;1m"], 110, 34);
+    expect(f2).toMatch(/◂ 1 \/ 3 ▸/);
+    expect(f2).toContain("GROK SAYS ship");
+    expect(f2).not.toContain("KIMI SAYS wait");
+    const f3 = await runWith({ ...s }, [TAB, `\x1b[<0;${x};${y + 1}M`, "]", "\x1b[<0;1;1m"], 110, 34);
+    expect(f3).toMatch(/◂ 2 \/ 3 ▸/);
+    expect(f3).toContain("KIMI SAYS wait");
+  });
+});
