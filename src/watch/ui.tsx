@@ -1008,7 +1008,7 @@ function MemoryView({ cwd, files, sel, off, width, rows, dokoroSearch, focus, fo
 
 /** Every key, per tab — the help overlay renders from this so it cannot drift from what works. */
 export const KEYS: Record<View | "all", Array<[string, string]>> = {
-  all: [["Tab / Shift+Tab", "next / previous tab (HOME → CALLS → CHAT → PROMPTS → MEMORY)"], ["click", "a tab, a call, a file, a technique, a pane"], ["^Y", "copy the open call / file / last answer"], ["^P · ^K", "pin the open call to the top · export it as markdown (dokoro/daily)"], ["^N", "solo chat: hide the brain's notes"], ["drag", "select text: copied, and attached to your next question (Esc drops)"], ["^X", "terminal select mode (Esc returns)"], ["click a link", "opens in Chrome (TACHI_BROWSER to change)"], ["Esc", "back out one layer — typed text, then the tab → HOME"], ["^F", "search this tab"], ["^T", "compact / normal density"], ["?", "this help"], ["^S · ^E", "send / edit the brain's proposal to Claude"], ["@claude <text>", "send your own text to Claude"], ["^C", "quit"]],
+  all: [["Tab / Shift+Tab", "next / previous tab (HOME → CALLS → CHAT → PROMPTS → MEMORY)"], ["click", "a tab, a call, a file, a technique, a pane"], ["^Y", "copy the open call / file / last answer"], ["^P · ^K", "pin the open call to the top · export it as markdown (dokoro/daily)"], ["^O", "mark the open call, open another: compare side by side (Esc ends)"], ["^N", "solo chat: hide the brain's notes"], ["drag", "select text: copied, and attached to your next question (Esc drops)"], ["^X", "terminal select mode (Esc returns)"], ["click a link", "opens in Chrome (TACHI_BROWSER to change)"], ["Esc", "back out one layer — typed text, then the tab → HOME"], ["^F", "search this tab"], ["^T", "compact / normal density"], ["?", "this help"], ["^S · ^E", "send / edit the brain's proposal to Claude"], ["@claude <text>", "send your own text to Claude"], ["^C", "quit"]],
   home: [["↑↓", "open the calls"], ["1-3", "ask a suggested question"]],
   calls: [["←→", "split: focus list · card · chat (keys act on the focused pane)"], ["↑↓", "move in the focused pane (list: select · card: line · chat: scroll)"], ["g / G", "top / end of the focused pane (input empty)"], ["PgUp/PgDn", "scroll the card a page"], ["wheel", "scrolls the pane under the pointer"], ["^B", "behind the scenes (model calls)"], ["/label <name>", "name this question group"], ["/layout auto|split|stack", "columns"], ["Enter", "ask the brain about this call"]],
   chat: [["↑↓ PgUp/PgDn", "scroll — scrolling up pauses, ↓ to the end resumes"], ["1-3", "ask a follow-up"], ["Enter", "ask the brain"]],
@@ -1202,6 +1202,8 @@ function App({ controller }: { controller: WatchController }) {
   const [cardTab, setCardTab] = useState<CardTab>("OUTPUT");
   // pinned calls stay on top of the list (^P)
   const [starred, setStarred] = useState<Set<string>>(() => new Set());
+  // compare: the call marked with ^O shows beside the open one
+  const [compareKey, setCompareKey] = useState<string | null>(null);
   const reviewAt = useRef(0);
   const [, setFoldTick] = useState(0);
   const [memFolded, setMemFolded] = useState<Set<string>>(() => new Set());
@@ -1508,6 +1510,13 @@ function App({ controller }: { controller: WatchController }) {
       return askSuggestion(ch, key);
     },
     calls: (ch, key) => {
+      if (key.ctrl && ch === "o" && current?.call) {
+        const k = current.call.key;
+        return did(() => {
+          setCompareKey((c) => (c === k ? null : k));
+          setToast({ text: compareKey === k ? "compare off" : "⇆ marked — open another call to compare them side by side · Esc ends", at: Date.now() });
+        });
+      }
       if (!items.length && askSuggestion(ch, key)) return true;
       if (wide && askFollowUp(ch, key)) return true;
       // split: ←/→ move focus between list, card (and chat); keys act on the focused pane
@@ -1739,7 +1748,8 @@ function App({ controller }: { controller: WatchController }) {
 
   // select mode: Esc returns the mouse to the pane before anything else sees the key
   const selectLayer: Layer = (_ch, key) =>
-    selectMode && key.escape ? did(() => setSelectMode(false))
+    compareKey && key.escape && !input ? did(() => setCompareKey(null))
+      : selectMode && key.escape ? did(() => setSelectMode(false))
       : attached && key.escape ? did(() => setAttached(null))
       : false;
   const LAYERS: Layer[] = [selectLayer, mouseLayer, quitLayer, proposalLayer, helpLayer, globalLayer, searchLayer, (ch, key) => tabLayers[view](ch, key), inputLayer];
@@ -1839,10 +1849,10 @@ function App({ controller }: { controller: WatchController }) {
     const above = off > 0;
     const shown = detail.slice(off, off + detailRoom - (detail.length > detailRoom ? 1 : 0) - (above ? 1 : 0));
     return (
-      <Box flexDirection="column" paddingX={1} borderStyle={wide && focusPane === "card" ? "bold" : "round"} borderColor={wide && focusPane === "card" ? focusColor(cardColor(c.status)) : wide ? "#3d4a5c" : cardColor(c.status)}>
+      <Box flexDirection="column" width={w} flexShrink={0} paddingX={1} borderStyle={wide && focusPane === "card" ? "bold" : "round"} borderColor={wide && focusPane === "card" ? focusColor(cardColor(c.status)) : wide ? "#3d4a5c" : cardColor(c.status)}>
         {wide ? (focusPane === "card"
-          ? <Text><Text backgroundColor={cardColor(c.status)} color="#0d1117" bold>{" CARD "}</Text><Text color={THEME.muted}> focused · ↑↓ line · PgUp/Dn page · g/G</Text></Text>
-          : <Text><Text backgroundColor={THEME.tagBg} color={cardColor(c.status)} bold>{" CARD "}</Text><Text color={THEME.muted}> click or → to scroll it</Text></Text>) : null}
+          ? <Text wrap="truncate-end"><Text backgroundColor={cardColor(c.status)} color="#0d1117" bold>{" CARD "}</Text><Text color={THEME.muted}> focused · ↑↓ line · PgUp/Dn page · g/G</Text></Text>
+          : <Text wrap="truncate-end"><Text backgroundColor={THEME.tagBg} color={cardColor(c.status)} bold>{" CARD "}</Text><Text color={THEME.muted}> click or → to scroll it</Text></Text>) : null}
         <CardHeader
           icon={c.status === "running" ? <Spinner frame={frame} color="#e3b341" /> : ICON[c.status].icon}
           iconColor={ICON[c.status].color}
@@ -2026,9 +2036,17 @@ function App({ controller }: { controller: WatchController }) {
             ];
           })()}
         </Box>
-        <Box flexDirection="column" width={cardW} flexShrink={0} overflow="hidden">
-          {current ? cardNode(current, cardW, bodyRows) : null}
-        </Box>
+        {(() => {
+          // compare: the marked call and the open one as two sibling columns (nesting shifts the inner box)
+          const other = compareKey && compareKey !== current?.call?.key ? allItems.find((x) => x.call?.key === compareKey) : undefined;
+          if (!current) return <Box width={cardW} flexShrink={0} />;
+          if (!other) return <Box flexDirection="column" width={cardW} flexShrink={0} overflow="hidden">{cardNode(current, cardW, bodyRows)}</Box>;
+          const half = Math.floor((cardW - 1) / 2);
+          return [
+            <Box key="cmp-a" flexDirection="column" width={half} flexShrink={0} overflow="hidden">{cardNode(other, half, bodyRows)}</Box>,
+            <Box key="cmp-b" flexDirection="column" width={cardW - half - 1} flexShrink={0} overflow="hidden">{cardNode(current, cardW - half - 1, bodyRows)}</Box>,
+          ];
+        })()}
         {threeCol ? (
           <Box flexDirection="column" width={chatW} flexShrink={0} overflow="hidden" borderStyle={focusPane === "chat" ? "bold" : "round"} borderColor={focusPane === "chat" ? focusColor(THEME.chat) : "#30363d"} paddingX={1}>
             <Text wrap="truncate-end">
@@ -2120,7 +2138,7 @@ function App({ controller }: { controller: WatchController }) {
           : size.cols < 80
             ? " · Tab · ↑↓ · ^F · Esc home"
             : wide
-              ? ` · click a call · ←→ focus ${focusPane} · ↑↓ move · drag select · ^Y copy · ^P pin · ^K export · ? keys`
+              ? ` · click a call · ←→ focus ${focusPane} · ↑↓ move · drag select · ^Y copy · ^P pin · ^K export · ^O compare · ? keys`
               : " · Tab chat · ↑↓ select · ^F search · ^B models · ^T density · ? keys · Esc home"}
       </Text>}
     </Box>
