@@ -298,6 +298,12 @@ export class WatchController {
   }
 
   private onEvent = (e: WatchEvent): void => {
+    // token usage only annotates the call it belongs to — never review context or a trigger
+    if (e.kind === "usage") {
+      this.cardState = applyEvent(this.cardState, e, this.config.maxCards);
+      this.set({ cards: this.cardState.cards });
+      return;
+    }
     if (e.kind === "prompt") {
       this.prompts.push(e);
       this.state = { ...this.state, prompts: [...this.state.prompts, { ts: e.ts, text: e.text }] };

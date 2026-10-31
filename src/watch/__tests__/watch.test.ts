@@ -354,3 +354,24 @@ describe("proposal hygiene", () => {
     expect(cleanProposal("x".repeat(PROPOSAL_MAX + 50)).length).toBe(PROPOSAL_MAX);
   });
 });
+
+describe("token usage", () => {
+  it("a usage trace event adds tokens to its model call; the header sums them", async () => {
+    const { parseTraceEvent } = await import("../events.js");
+    const { applyEvent } = await import("../store.js");
+    const { tokenTags } = await import("../ui.js");
+    let st = { cards: [], alias: {} } as never as ReturnType<typeof applyEvent>;
+    for (const raw of [
+      { type: "span.start", id: "s1", kind: "tool", name: "jury", ts: 1 },
+      { type: "span.start", id: "s2", parentId: "s1", kind: "model", name: "openai:gpt-6.1-sol", ts: 2 },
+      { type: "usage", id: "u1", parentId: "s2", name: "usage", ts: 3, tokensIn: 12400, tokensOut: 3100, tokensReasoning: 800 },
+      { type: "span.end", id: "s2", parentId: "s1", kind: "model", name: "openai:gpt-6.1-sol", ts: 4, ms: 2, output: "ok" },
+    ] as never[]) {
+      const e = parseTraceEvent(raw);
+      if (e) st = applyEvent(st, e, 100);
+    }
+    const model = st.cards.find((c) => c.key === "tb:s2")!;
+    expect(model.tokensIn).toBe(12400);
+    expect(tokenTags({ call: st.cards[0], models: [model], notes: [] } as never)[0].label).toBe("in 12k · out 3.1k · think 800");
+  });
+});

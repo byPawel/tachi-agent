@@ -22,7 +22,8 @@ export type WatchKind =
   | "model"       // tachibot call finished
   | "model-error" // tachibot call failed
   | "fallback"    // tachibot answered with a different model than requested
-  | "thought";    // tachibot nextThought step
+  | "thought"     // tachibot nextThought step
+  | "usage";      // tokens a tachibot model call spent
 
 export interface WatchEvent {
   source: "claude" | "tachibot";
@@ -51,6 +52,10 @@ export interface WatchEvent {
   spanKind?: "tool" | "model";
   /** Background task id linking a tool-bg call to its later result. */
   taskId?: string;
+  /** usage: tokens the model call spent */
+  tokensIn?: number;
+  tokensOut?: number;
+  tokensReasoning?: number;
 }
 
 const PREVIEW = 300;
@@ -222,7 +227,7 @@ export function parseClaudeEntry(entry: unknown, now: number = Date.now()): Watc
 
 /** Shape of a tachibot trace event (mirrors tachibot-mcp src/utils/trace-bus.ts). */
 export interface TachibotTraceEvent {
-  type: "span.start" | "span.end" | "thought";
+  type: "span.start" | "span.end" | "thought" | "usage";
   id: string;
   parentId?: string;
   kind?: "tool" | "model";
@@ -235,6 +240,9 @@ export interface TachibotTraceEvent {
   degradedTo?: string;
   thoughtNumber?: number;
   model?: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  tokensReasoning?: number;
 }
 
 const tb = (id: string) => `tb:${id}`;
@@ -244,6 +252,12 @@ export function parseTraceEvent(e: TachibotTraceEvent): WatchEvent | undefined {
     source: "tachibot" as const, ts: e.ts, id: tb(e.id), parentId: e.parentId ? tb(e.parentId) : undefined,
     tool: e.name, spanKind: e.kind,
   };
+  if (e.type === "usage") {
+    // the tokens belong to the model span that was running (its parent)
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+    if (!e.parentId) return undefined;
+    return { ...base, id: tb(e.parentId), kind: "usage", text: "usage", tokensIn: n(e.tokensIn), tokensOut: n(e.tokensOut), tokensReasoning: n(e.tokensReasoning) };
+  }
   if (e.type === "thought") {
     return { ...base, kind: "thought", text: `#${e.thoughtNumber}${e.model ? ` (${e.model})` : ""} ${clip(e.input ?? "", 200)}`, input: clip(e.input ?? ""), output: e.output ? clip(e.output) : undefined };
   }

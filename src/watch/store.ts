@@ -15,6 +15,10 @@ export type CardType = "prompt" | "say" | "tool" | "span" | "thought" | "note" |
 export type CardStatus = "running" | "ok" | "error" | "fallback" | "info";
 
 export interface Card {
+  /** tokens this call (a model span) spent, summed over its usage reports */
+  tokensIn?: number;
+  tokensOut?: number;
+  tokensReasoning?: number;
   key: string;
   type: CardType;
   title: string;
@@ -132,6 +136,13 @@ export function applyEvent(state: CardState, e: WatchEvent, max = 200): CardStat
         ...base, key: e.id ?? nextKey("s"), type: "span", title: e.spanKind === "model" ? (e.tool ?? e.text) : e.text,
         status: "running", depth: depthOf(e.parentId), input: e.input, tool: e.tool,
       }, e.parentId);
+    }
+    case "usage": {
+      const key = resolve(e.id);
+      const target = key ? cards.find((c) => c.key === key) : undefined;
+      if (!target) return state;
+      const add2 = (a?: number, b?: number) => (a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0));
+      return { cards: patchCard(cards, target.key, { tokensIn: add2(target.tokensIn, e.tokensIn), tokensOut: add2(target.tokensOut, e.tokensOut), tokensReasoning: add2(target.tokensReasoning, e.tokensReasoning) }) ?? cards, alias };
     }
     case "model":
     case "model-error":

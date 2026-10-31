@@ -20,7 +20,7 @@ import wrapAnsi from "wrap-ansi";
 import { CardHeader, FollowUps, Shimmer, Spinner, TabBar, Tag, tabSpans, THEME, gauge, shortModel, sparkline, stepsLine, toolTimeoutMs, useFrame, type View } from "./components.js";
 import { confidenceMeter, councilPanel, councilPhases, parsePlanner, renderersFor, setPlannerSteps, setThoughtChain, toolCard, type PlannerStepInfo } from "./cards.js";
 import { rankTechniques, type Technique } from "./prompts.js";
-import { linkifyAnsi, renderMarkdown } from "./md.js";
+import { linkifyAnsi, renderMarkdown, stripControls } from "./md.js";
 import type { Card } from "./store.js";
 import type { WatchController, WatchState } from "./watch.js";
 
@@ -576,6 +576,18 @@ export function highlightAnsi(line: string, words: string[]): string {
     .split(/(\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07)/)
     .map((part, i) => (i % 2 ? part : part.replace(re, "\x1b[48;2;92;72;18m$1\x1b[49m")))
     .join("");
+}
+
+/** "in 12.4k · out 3.1k" (+ reasoning) for a call: its own usage plus its model calls'. */
+export function tokenTags(it: Item): Array<{ label: string; color?: string }> {
+  const all = [it.call, ...it.models].filter((x): x is Card => !!x);
+  const sum = (k: "tokensIn" | "tokensOut" | "tokensReasoning") => all.reduce((n, x) => n + (x[k] ?? 0), 0);
+  const tin = sum("tokensIn");
+  const tout = sum("tokensOut");
+  const reason = sum("tokensReasoning");
+  if (!tin && !tout) return [];
+  const k = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  return [{ label: `in ${k(tin)} · out ${k(tout)}${reason ? ` · think ${k(reason)}` : ""}`, color: "#8b949e" }];
 }
 
 export type CardTab = "OUTPUT" | "INPUT" | "MODELS";
@@ -1893,6 +1905,7 @@ function App({ controller }: { controller: WatchController }) {
           tags={[
             { label: c.status, color: ICON[c.status].color },
             ...(c.ms !== undefined ? [{ label: `${(c.ms / 1000).toFixed(1)}s`, color: "#f0f6fc" }] : []),
+            ...tokenTags(it),
             ...(c.status === "running" ? [{ label: gauge(nowMs - c.ts, toolTimeoutMs(c.title)), color: "#e3b341" }] : []),
             ...[...new Set(it.models.filter((m) => m.type !== "thought").map((m) => shortModel(m.title)))].slice(0, 4).map((m) => ({ label: m, color: "#56d364" })),
             ...(it.notes.some((n) => n.type === "note") ? [{ label: `● ${it.notes.filter((n) => n.type === "note").length}`, color: "#e3b341" }] : []),
@@ -1958,10 +1971,14 @@ function App({ controller }: { controller: WatchController }) {
       let b = at;
       while (b + 1 < all.length && num(all[b + 1]) > num(all[b])) b++;
       return all.slice(a, b + 1).map((x, k) => {
-        let args: { model?: string; thought?: string; totalThoughts?: number } = {};
+        // the args are model-written JSON: coerce the types, strip every control char before drawing
+        let args: Record<string, unknown> = {};
         try { args = JSON.parse(x.call!.inputFull ?? x.call!.input ?? "{}"); } catch { /* keep defaults */ }
-        const gist = (args.thought ?? visibleOf(x.call!.output ?? "")).replace(/\s+/g, " ").trim();
-        return { n: num(x) || k + 1, total: args.totalThoughts, model: args.model ?? "claude", gist, current: a + k === at };
+        const thought = typeof args.thought === "string" ? args.thought : visibleOf(x.call!.output ?? "");
+        const gist = stripControls(thought).replace(/\s+/g, " ").trim();
+        const model = stripControls(typeof args.model === "string" ? args.model : "claude").slice(0, 24);
+        const total = typeof args.totalThoughts === "number" && Number.isFinite(args.totalThoughts) ? args.totalThoughts : undefined;
+        return { n: num(x) || k + 1, total, model, gist, current: a + k === at };
       });
     });
   }, [allItems]);
