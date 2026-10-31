@@ -548,6 +548,21 @@ const detailCache = new Map<string, Line[]>();
 /** planner_maker phases seen this session, step → phase — the planner card names its segments with them */
 let plannerPhases = new Map<number, PlannerStepInfo>();
 
+export type CardTab = "OUTPUT" | "INPUT" | "MODELS";
+
+/** Which tab each card line belongs to: STEPS and "behind the scenes" → MODELS, INPUT → INPUT, the rest → OUTPUT. */
+export function tabLines(lines: Line[]): Record<CardTab, Line[]> {
+  const out: Record<CardTab, Line[]> = { OUTPUT: [], INPUT: [], MODELS: [] };
+  let cur: CardTab = "OUTPUT";
+  for (const l of lines) {
+    if (l.section) cur = l.section === "INPUT" ? "INPUT" : l.section === "STEPS" ? "MODELS" : "OUTPUT";
+    else if (/^[▸▾] behind the scenes/.test(l.text)) cur = "MODELS";
+    else if (l.text.startsWith("SECOND BRAIN")) cur = "OUTPUT"; // the brain's note on this call reads with the output
+    out[cur].push(l);
+  }
+  return out;
+}
+
 /** Card sections the viewer folded (an accordion): one set for every card, so INPUT stays folded as you move */
 export const foldedSections = new Set<string>();
 
@@ -1169,6 +1184,8 @@ function App({ controller }: { controller: WatchController }) {
   const [chatSolo, setChatSolo] = useState(false);
   // a long proposal is reviewed whole before it can be sent: the first ^S expands it
   const [reviewing, setReviewing] = useState<string | null>(null);
+  // the open card's tab — every card opens on OUTPUT
+  const [cardTab, setCardTab] = useState<CardTab>("OUTPUT");
   const reviewAt = useRef(0);
   const [, setFoldTick] = useState(0);
   const [memFolded, setMemFolded] = useState<Set<string>>(() => new Set());
@@ -1293,6 +1310,9 @@ function App({ controller }: { controller: WatchController }) {
   const pulsing = nowMs - focusAt < 650;
   const focusColor = (accent: string) => (pulsing && frame % 2 === 0 ? "#f0f6fc" : accent);
   const current = idx >= 0 ? items[idx] : undefined;
+  // every card opens on OUTPUT
+  const currentKey = current?.call?.key;
+  useEffect(() => setCardTab("OUTPUT"), [currentKey]);
   const offKey = current?.call?.key ?? current?.loose?.key ?? "";
   const offset = offsets[offKey] ?? 0;
   const setOffset = (f: number | ((o: number) => number)) =>
@@ -1598,6 +1618,12 @@ function App({ controller }: { controller: WatchController }) {
       const sec = at(/[▾▸] (STEPS|INPUT|OUTPUT)\b/);
       if (sec) return did(() => { foldedSections.has(sec[1]) ? foldedSections.delete(sec[1]) : foldedSections.add(sec[1]); setFoldTick((t) => t + 1); });
       if (at(/[▾▸] behind the scenes/)) return did(() => setExpanded((e) => !e));
+      for (const t of ["OUTPUT", "INPUT", "MODELS"] as CardTab[]) {
+        const h = new RegExp(` ${t}(?: \\d+)? `).exec(row);
+        if (!h) continue;
+        const from = Array.from(row.slice(0, h.index)).length + 1;
+        if (x >= from && x <= from + h[0].length - 1) return did(() => { setCardTab(t); setOffset(0); });
+      }
       const tagAt = /( SOLO | ALL ) \^N/.exec(row);
       if (tagAt && Math.abs(x - 1 - Array.from(row.slice(0, tagAt.index)).length - 3) <= 4) return did(() => setChatSolo((v) => !v));
       const grp = view === "memory" ? at(/[▾▸] (PROJECT|CLAUDE MEMORY|DOKORO)\b/) : null;
@@ -1731,7 +1757,7 @@ function App({ controller }: { controller: WatchController }) {
       );
     }
     const c = it.call!;
-    const detailRoom = Math.max(4, room - 3 - (wide ? 1 : 0));
+    const detailRoom = Math.max(4, room - 4 - (wide ? 1 : 0));
     // the judge that closes a council opens as the Council panel, its full answer below
     const council = /gemini_judge$/.test(c.title) && c.status !== "running"
       ? councilPanel(allItems.filter((x) => x.call).map((x) => ({ tool: x.call!.title, status: x.call!.status, ts: x.call!.ts, ms: x.call!.ms, input: x.call!.inputFull ?? x.call!.input, output: x.call!.full ?? x.call!.output, cite: x.call!.cite })),
@@ -1740,7 +1766,13 @@ function App({ controller }: { controller: WatchController }) {
     const detailAll = council.length
       ? [...council.map((text): Line => ({ text, ansi: true })), { text: "" } as Line, ...detailFor(it, w - 4, s.reviewingKey === c.key, expanded)]
       : detailFor(it, w - 4, s.reviewingKey === c.key, expanded);
-    const detail = dense ? detailAll.filter((l) => l.text !== "") : detailAll;
+    // tabs: the card shows one part at a time; it opens on OUTPUT
+    const byTab = tabLines(detailAll);
+    const tabCounts: Record<CardTab, number> = { OUTPUT: 0, INPUT: byTab.INPUT.filter((l) => l.text.trim() && !l.section).length, MODELS: it.models.length };
+    const tabsShown = (["OUTPUT", "INPUT", "MODELS"] as CardTab[]).filter((t) => t === "OUTPUT" || byTab[t].length);
+    const activeTab = tabsShown.includes(cardTab) ? cardTab : "OUTPUT";
+    const tabBody = byTab[activeTab].filter((l, i) => !(i === 0 && l.section)); // the tab names the part
+    const detail = dense ? tabBody.filter((l) => l.text !== "") : tabBody;
     const maxOffset = Math.max(0, detail.length - detailRoom);
     cardMax.current = maxOffset;
     const off = Math.min(offset, maxOffset);
@@ -1766,6 +1798,16 @@ function App({ controller }: { controller: WatchController }) {
             ...(confidenceMeter(c.full ?? c.output ?? "") ? [{ label: confidenceMeter(c.full ?? c.output ?? "")!, color: "#e3b341" }] : []),
           ]}
         />
+        <Text wrap="truncate-end">
+          {tabsShown.map((t) => (
+            <Text key={t}>
+              {t === activeTab
+                ? <Text backgroundColor={cardColor(c.status)} color="#0d1117" bold>{` ${t}${tabCounts[t] ? ` ${tabCounts[t]}` : ""} `}</Text>
+                : <Text backgroundColor={THEME.tagBg} color={THEME.muted}>{` ${t}${tabCounts[t] ? ` ${tabCounts[t]}` : ""} `}</Text>}
+              <Text> </Text>
+            </Text>
+          ))}
+        </Text>
         {above ? <Text color="#79c0ff" wrap="truncate-end">{`↑ ${off} lines above — PgUp`}</Text> : null}
         {shown.map((l, i) => (
           <Text key={i} wrap="truncate-end">

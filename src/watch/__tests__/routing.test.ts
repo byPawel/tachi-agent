@@ -131,20 +131,19 @@ describe("MEMORY reader keys", () => {
   });
 });
 
-describe("accordion", () => {
-  it("clicking a card's ▾ INPUT header folds it, clicking again opens it", async () => {
-    const plain = (f: string) => f.split("\n");
-    const { foldedSections } = await import("../ui.js");
-    foldedSections.clear();
+describe("card tabs", () => {
+  it("opens on OUTPUT; clicking INPUT shows the input", async () => {
     const s = state();
-    const frame1 = await runWith(s, [TAB], 100, 34);
-    const y = plain(frame1).findIndex((l) => l.includes("▾ INPUT"));
-    expect(y).toBeGreaterThan(0);
-    const x = plain(frame1)[y].indexOf("▾ INPUT") + 3;
-    const folded = await runWith(state(), [TAB, `\x1b[<0;${x};${y + 1}M`, "\x1b[<0;1;1m"], 100, 34);
-    expect(folded).toContain("▸ INPUT");
-    expect(folded).toMatch(/line[s]? folded/);
-    const opened = await runWith(state(), [TAB, `\x1b[<0;${x};${y + 1}M`, "\x1b[<0;1;1m"], 100, 34);
-    expect(opened).toContain("▾ INPUT");
+    const f1 = await runWith(s, [TAB], 100, 34);
+    expect(f1).toMatch(/ OUTPUT +INPUT \d+ /);
+    expect(f1).toContain("beta answer");
+    const count = (f: string) => f.split("beta problem").length - 1; // the call list shows it once as the row hint
+    expect(count(f1)).toBe(1);
+    const rows = f1.split("\n");
+    const y = rows.findIndex((l) => / INPUT \d+ /.test(l));
+    const x = rows[y].indexOf(" INPUT") + 3;
+    const f2 = await runWith(state(), [TAB, `\x1b[<0;${x};${y + 1}M`, "\x1b[<0;1;1m"], 100, 34);
+    expect(count(f2)).toBe(2);
+    expect(f2).not.toContain("beta answer");
   });
 });
