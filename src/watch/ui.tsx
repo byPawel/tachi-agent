@@ -1311,7 +1311,12 @@ function App({ controller }: { controller: WatchController }) {
   // approval needs a deliberate key — bare letters always go to the input
   const proposalLayer: Layer = (ch, key) => {
     if (!s.proposal || editing) return false;
-    if (key.ctrl && ch === "s") return did(() => Date.now() - shownAt > 1000 && controller.send(s.proposal!));
+    // a proposal longer than its 3 visible lines is never sent unseen: the first ^S opens it whole
+    if (key.ctrl && ch === "s") return did(() => {
+      if (Date.now() - shownAt <= 1000) return;
+      if (proposalLines.length > 3) { setEditing(true); setInput(s.proposal!); return; }
+      controller.send(s.proposal!);
+    });
     if (key.escape && !input) return did(() => controller.cancelProposal());
     if (key.ctrl && ch === "e") return did(() => { setEditing(true); setInput(s.proposal!); });
     return false;

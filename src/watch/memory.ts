@@ -52,7 +52,19 @@ export function memoryFiles(cwd: string, extra: string[] = [], home: string = ho
     }
   }
   for (const n of notes.sort((a, b) => b.mtime - a.mtime).slice(0, 6)) files.push(n.path);
-  for (const f of extra) files.push(isAbsolute(f) ? f : join(cwd, f));
+  for (const f of extra) {
+    // relative entries must resolve inside the project (symlinks included); absolute ones only come from ~/.tachi
+    const p = isAbsolute(f) ? f : join(cwd, f);
+    if (!isAbsolute(f)) {
+      try {
+        const real = fs.realpathSync(p);
+        if (relative(fs.realpathSync(cwd), real).startsWith("..")) continue;
+      } catch {
+        continue;
+      }
+    }
+    files.push(p);
+  }
   return files;
 }
 

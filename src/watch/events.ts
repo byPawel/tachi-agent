@@ -68,6 +68,9 @@ export function safeAnsi(s: string, max = 30_000): string {
     .replace(/\x1b\[[0-9;?]*[ -\/]*[@-ln-~]/g, "")        // every CSI except SGR (…m)
     .replace(/\r/g, "")
     .replace(/\n{3,}/g, "\n\n")
+    // allowlist: an ESC that does not start a well-formed SGR, and every C1/other control byte, is dropped
+    .replace(/\x1b(?!\[[0-9;]*m)/g, "")
+    .replace(/[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f\x80-\x9f]/g, "")
     .trim();
   return t.length > max ? `${t.slice(0, max - 1)}…\x1b[0m` : t;
 }

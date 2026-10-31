@@ -14,7 +14,7 @@
  */
 import fs from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, isAbsolute } from "node:path";
 import type { ReviewPolicy } from "./policy.js";
 
 export type WatchLayout = "auto" | "split" | "stack";
@@ -59,8 +59,11 @@ const posInt = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined;
 
 /** Merge one raw (untrusted JSON) layer onto a config. Bad values are ignored, not fatal. */
-export function mergeConfig(base: WatchConfig, raw: RawConfig, source: string): WatchConfig {
-  const files = Array.isArray(raw.memory?.files) ? raw.memory.files.filter((f): f is string => typeof f === "string") : [];
+export function mergeConfig(base: WatchConfig, raw: RawConfig, source: string, trusted = true): WatchConfig {
+  // a project's .tachi/watch.json comes with the repo: it may not run commands, and its memory
+  // files must stay inside the project (they are read and sent to the brain)
+  const files = (Array.isArray(raw.memory?.files) ? raw.memory.files.filter((f): f is string => typeof f === "string") : [])
+    .filter((f) => trusted || (!isAbsolute(f) && !f.split(/[\\/]/).includes("..")));
   const minSec = posInt(raw.review?.minIntervalSec);
   return {
     brain: typeof raw.brain === "string" && raw.brain.trim() ? raw.brain.trim() : base.brain,
@@ -72,7 +75,7 @@ export function mergeConfig(base: WatchConfig, raw: RawConfig, source: string): 
     memory: {
       files: [...base.memory.files, ...files],
       maxSnippets: posInt(raw.memory?.maxSnippets) ?? base.memory.maxSnippets,
-      dokoroCmd: typeof raw.memory?.dokoroCmd === "string" && raw.memory.dokoroCmd.trim() ? raw.memory.dokoroCmd.trim() : base.memory.dokoroCmd,
+      dokoroCmd: trusted && typeof raw.memory?.dokoroCmd === "string" && raw.memory.dokoroCmd.trim() ? raw.memory.dokoroCmd.trim() : base.memory.dokoroCmd,
     },
     maxCards: posInt(raw.maxCards) ?? base.maxCards,
     layout: isLayout(raw.layout) ? raw.layout : base.layout,
@@ -95,9 +98,10 @@ export function loadWatchConfig(
   home: string = homedir(),
 ): WatchConfig {
   let cfg = DEFAULT_CONFIG;
-  for (const file of [join(home, ".tachi", "watch.json"), join(cwd, ".tachi", "watch.json")]) {
+  const homeFile = join(home, ".tachi", "watch.json");
+  for (const file of [homeFile, join(cwd, ".tachi", "watch.json")]) {
     const raw = readJson(file);
-    if (raw) cfg = mergeConfig(cfg, raw, file);
+    if (raw) cfg = mergeConfig(cfg, raw, file, file === homeFile);
   }
   if (env.TACHI_WATCH_BRAIN?.trim()) cfg = { ...cfg, brain: env.TACHI_WATCH_BRAIN.trim(), loadedFrom: [...cfg.loadedFrom, "env"] };
   return cfg;

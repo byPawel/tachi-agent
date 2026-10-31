@@ -51,12 +51,13 @@ export async function loadTechniques(cwd: string, trace?: { port: number; token:
       // older tachibot without /techniques, or not reachable — try the build
     }
   }
+  // importing the project's build runs code from the repo — only when the user opts in
   const mod = path.join(cwd, "dist", "src", "tools", "prompt-technique-tools.js");
-  if (fs.existsSync(mod)) {
+  if (process.env.TACHI_WATCH_LOCAL_TECHNIQUES === "1" && fs.existsSync(mod)) {
     const m = (await import(pathToFileURL(mod).href)) as { FLAT_TECHNIQUES?: unknown };
     if (isList(m.FLAT_TECHNIQUES)) return { list: m.FLAT_TECHNIQUES, from: "tachibot build" };
   }
-  throw new Error("no technique catalog — run tachibot with TACHIBOT_TRACE_UI=1, or open the pane in the tachibot-mcp project");
+  throw new Error("no technique catalog — run tachibot with TACHIBOT_TRACE_UI=1 (or set TACHI_WATCH_LOCAL_TECHNIQUES=1 in the tachibot-mcp project)");
 }
 
 /** Rank for a free-text task: name/alias hits weigh most, then "use when", then the description; core first on ties. */

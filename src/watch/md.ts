@@ -42,7 +42,11 @@ const CALLOUT: Record<string, { icon: string; color: (s: string) => string }> = 
 };
 
 /** OSC 8 terminal hyperlink — clickable in cmux/ghostty, iTerm2, kitty, wezterm, VS Code. */
-export const link = (text: string, url: string) => `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+export const link = (text: string, url: string) =>
+  /[\x00-\x1f\x7f-\x9f]/.test(url) ? text : `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+
+/** Untrusted text (model output): no ESC, no C0/C1 controls except tab and newline — styling is added after. */
+export const stripControls = (s: string) => s.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 
 const URL_RE = /\bhttps?:\/\/[^\s<>()\[\]"'`\x1b]+[^\s<>()\[\]"'`.,;:!?\x1b]/g;
 
@@ -125,6 +129,7 @@ function table(rows: string[], width: number): string[] {
 }
 
 export function renderMarkdown(text: string, width: number): string[] {
+  text = stripControls(text);
   const out: string[] = [];
   const emit = (s: string, indent = "") => {
     for (const l of wrapAnsi(s, Math.max(10, width - indent.length), { hard: true, trim: false }).split("\n")) out.push(indent + l);

