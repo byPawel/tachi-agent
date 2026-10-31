@@ -192,3 +192,18 @@ describe("algo and testgen views", () => {
     expect(tests).toContain("● keeps order");
   });
 });
+
+describe("thought chain", () => {
+  it("draws the run as model nodes with gists, the open one marked", async () => {
+    const { thoughtView } = await import("../cards.js");
+    const out = thoughtView([
+      { n: 1, total: 3, model: "grok", gist: "Frame the decision" },
+      { n: 2, total: 3, model: "kimi", gist: "Score each option", current: true },
+      { n: 3, total: 3, model: "gemini", gist: "Final recommendation" },
+    ], 60).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+    expect(out[0]).toBe("THOUGHT CHAIN  3 of 3");
+    expect(out[1]).toMatch(/1 grok .*── .*2 kimi .*── .*3 gemini/);
+    expect(out).toContain(" 2  Score each option");
+    expect(thoughtView([{ n: 1, model: "grok", gist: "x" }], 60)).toEqual([]);
+  });
+});

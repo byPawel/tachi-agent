@@ -18,7 +18,7 @@ import { Box, Text, measureElement, render, useApp, useInput, useStdout, type DO
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import { CardHeader, FollowUps, Shimmer, Spinner, TabBar, Tag, tabSpans, THEME, gauge, shortModel, sparkline, stepsLine, toolTimeoutMs, useFrame, type View } from "./components.js";
-import { confidenceMeter, councilPanel, councilPhases, parsePlanner, renderersFor, setPlannerSteps, toolCard, type PlannerStepInfo } from "./cards.js";
+import { confidenceMeter, councilPanel, councilPhases, parsePlanner, renderersFor, setPlannerSteps, setThoughtChain, toolCard, type PlannerStepInfo } from "./cards.js";
 import { rankTechniques, type Technique } from "./prompts.js";
 import { linkifyAnsi, renderMarkdown } from "./md.js";
 import type { Card } from "./store.js";
@@ -1838,7 +1838,7 @@ function App({ controller }: { controller: WatchController }) {
     const tabCounts: Record<CardTab, number> = { OUTPUT: 0, INPUT: byTab.INPUT.filter((l) => l.text.trim() && !l.section).length, MODELS: it.models.length };
     const tabsShown = (["OUTPUT", "INPUT", "MODELS"] as CardTab[]).filter((t) => t === "OUTPUT" || byTab[t].length);
     const activeTab = tabsShown.includes(cardTab) ? cardTab : "OUTPUT";
-    const tabBody = byTab[activeTab].filter((l, i) => !(i === 0 && l.section)); // the tab names the part
+    const tabBody = byTab[activeTab].filter((l) => !l.section || l.section === "STEPS"); // the tab names the part
     const detail = dense ? tabBody.filter((l) => l.text !== "") : tabBody;
     // a CALLS search marks its matches in the open card
     const hitWords = queries.calls.trim() ? queries.calls.trim().split(/\s+/).filter((x) => x.length > 1) : [];
@@ -1911,6 +1911,26 @@ function App({ controller }: { controller: WatchController }) {
     }
     plannerPhases = m;
     setPlannerSteps(m);
+    // nextThought: the run around the open call — consecutive nextThought calls in its question
+    setThoughtChain((output) => {
+      const all = allItems.filter((x) => x.call && /nextThought$/.test(x.call.title));
+      const at = all.findIndex((x) => visibleOf(x.call!.fullAnsi ?? x.call!.full ?? x.call!.output ?? "") === output);
+      if (at < 0) return [];
+      // the run: walk back to thought 1 and forward while the numbers keep rising
+      const num = (x: Item) => {
+        try { return Number(JSON.parse(x.call!.inputFull ?? x.call!.input ?? "{}").thoughtNumber) || 0; } catch { return Number(/"thoughtNumber"\s*:\s*(\d+)/.exec(x.call!.inputFull ?? "")?.[1] ?? 0); }
+      };
+      let a = at;
+      while (a > 0 && num(all[a - 1]) > 0 && num(all[a - 1]) < num(all[a])) a--;
+      let b = at;
+      while (b + 1 < all.length && num(all[b + 1]) > num(all[b])) b++;
+      return all.slice(a, b + 1).map((x, k) => {
+        let args: { model?: string; thought?: string; totalThoughts?: number } = {};
+        try { args = JSON.parse(x.call!.inputFull ?? x.call!.input ?? "{}"); } catch { /* keep defaults */ }
+        const gist = (args.thought ?? visibleOf(x.call!.output ?? "")).replace(/\s+/g, " ").trim();
+        return { n: num(x) || k + 1, total: args.totalThoughts, model: args.model ?? "claude", gist, current: a + k === at };
+      });
+    });
   }, [allItems]);
   const qgroups = useMemo(() => questionGroups(items, s.prompts, s.labels), [items, s.prompts, s.labels]);
   const openGroup = qgroups.find((g) => idx >= g.start && idx <= g.end);

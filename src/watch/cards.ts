@@ -583,3 +583,34 @@ registerCard({
     return p.rest ? undefined : ["\x1b[2m(the step block above is the whole output)\x1b[22m"];
   },
 });
+
+// --- nextThought: the chain this thought belongs to -------------------------------
+export interface Thought { n: number; total?: number; model: string; gist: string; current?: boolean }
+let thoughtChain: (output: string) => Thought[] = () => [];
+/** The UI hands the chain of the open call's nextThought run (its question group). */
+export function setThoughtChain(fn: (output: string) => Thought[]): void {
+  thoughtChain = fn;
+}
+
+/** A chain of model nodes, the open thought amber, each node's one-line gist under it. */
+export function thoughtView(chain: Thought[], width: number): string[] {
+  if (chain.length < 2) return [];
+  const node = (t: Thought) => (t.current ? chip(`${t.n} ${t.model}`, "#e3b341", "#2a1f0a") : chip(`${t.n} ${t.model}`, "#79c0ff", "#1f2937"));
+  const rows: string[] = [];
+  let row = "";
+  for (const [i, t] of chain.entries()) {
+    const piece = (i ? dim(" ── ") : "") + node(t);
+    if (row && stringWidth(row.replace(/\x1b\[[0-9;]*m/g, "")) + stringWidth(piece.replace(/\x1b\[[0-9;]*m/g, "")) > width) {
+      rows.push(row);
+      row = node(t);
+    } else row += piece;
+  }
+  rows.push(row);
+  const gists = chain.map((t) => {
+    const g = t.gist.length > width - 6 ? `${t.gist.slice(0, width - 7)}…` : t.gist;
+    return `${t.current ? yellow(String(t.n).padStart(2)) : dim(String(t.n).padStart(2))}  ${t.current ? g : dim(g)}`;
+  });
+  return [bold(`THOUGHT CHAIN  ${chain.length}${chain[0].total ? ` of ${chain[0].total}` : ""}`), ...rows, "", ...gists];
+}
+
+registerCard({ name: "thoughts", match: /^nextThought$/, top: (c) => { const v = thoughtView(thoughtChain(c.output), c.width); return v.length ? [...v, ""] : []; } });
