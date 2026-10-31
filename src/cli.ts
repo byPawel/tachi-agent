@@ -41,6 +41,17 @@ function makeServiceDeps(): ServiceDeps {
 async function main() {
   const envFileKeys = await loadUserEnv(); // ~/.tachi/.env as defaults — real env vars win
   const argv = process.argv.slice(2);
+
+  // ---------------------------------------------------------------------------
+  // watch — side agent in a split next to Claude Code (src/watch/)
+  // ---------------------------------------------------------------------------
+  if (argv[0] === "watch") {
+    const { parseWatchArgs, openWatchSplit, runWatch } = await import("./watch/watch.js");
+    const args = parseWatchArgs(argv.slice(1));
+    if (args.open) await openWatchSplit(args);
+    else await runWatch(args);
+    return;
+  }
   const parsed = parseCliArgs(argv);
 
   // ---------------------------------------------------------------------------
