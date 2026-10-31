@@ -286,6 +286,18 @@ describe("styleAnsi", () => {
     expect(styleAnsi("- keep fixes")).toContain("\x1b[38;2;121;192;255m•");
     expect(styleAnsi("plain text")).toBe("plain text");
   });
+
+  it("turns tachibot's background heading pills into ▍ / ◆ headings", async () => {
+    const { styleAnsi, isPill } = await import("../ui.js");
+    const h2 = "\x1b[1m\x1b[38;2;0;0;0m\x1b[48;2;175;135;255m 🧠 RHETORICAL PURPOSE \x1b[49m\x1b[39m\x1b[22m";
+    expect(isPill(h2)).toBe(true);
+    expect(styleAnsi(h2)).toBe("\x1b[1m\x1b[38;2;210;168;255m🧠 RHETORICAL PURPOSE\x1b[0m");
+    expect(styleAnsi("\x1b[48;5;183m • Primary Objective \x1b[0m")).toBe("\x1b[1m\x1b[38;2;121;192;255m◆ Primary Objective\x1b[0m");
+    // a colored word inside prose is not a heading; a 48 inside an RGB foreground is not a background
+    expect(isPill("see \x1b[48;5;183mthis\x1b[0m here")).toBe(false);
+    expect(isPill("\x1b[38;2;48;48;48mgray text\x1b[39m")).toBe(false);
+    expect(styleAnsi("\x1b[1m🛠 IMPLEMENTATION SUMMARY\x1b[22m ───")).toBe("\x1b[1m\x1b[38;2;210;168;255m🛠 IMPLEMENTATION SUMMARY\x1b[0m");
+  });
 });
 
 describe("prompt ranking stopwords", () => {

@@ -518,8 +518,12 @@ export function plannerCard(p: PlannerStep, width: number, steps: Map<number, Pl
   out.push("");
   out.push(`\x1b[1m${P_TEXT(`Step ${p.step} of ${p.total}`)}\x1b[22m ${P_PURPLE(`· ${p.phase}`)}`);
   out.push("");
-  // every step by name, one or two columns
-  const cols = width >= 60 ? 2 : 1;
+  // every step by name: two columns only when no name gets cut, else one full-width column
+  const longest = Math.max(0, ...Array.from({ length: p.total }, (_, i) => {
+    const info = i + 1 === p.step ? { phase: p.phase, action: steps.get(i + 1)?.action } : steps.get(i + 1);
+    return info ? `${info.phase}${info.action ? ` · ${info.action}` : ""}`.length : 0;
+  }));
+  const cols = width >= 60 && longest <= Math.floor((width - 2) / 2) - 5 ? 2 : 1;
   const colW = Math.floor((width - (cols - 1) * 2) / cols);
   const entry = (n: number) => {
     const info = n === p.step ? { phase: p.phase, action: steps.get(n)?.action } : steps.get(n);

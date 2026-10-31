@@ -267,9 +267,41 @@ const visibleOf = (l: string) => l.replace(/\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07
 const HEAD = "\x1b[1m\x1b[38;2;210;168;255m";
 const MARK = "\x1b[38;2;121;192;255m";
 const BRIGHT = "\x1b[38;2;240;246;252m";
+const SUB = "\x1b[1m\x1b[38;2;121;192;255m";
+
+/** Every visible character of the line sits on a background color: tachibot's heading pill. */
+export function isPill(line: string): boolean {
+  let bg = false, saw = false;
+  const parts = line.split(/(\x1b\[[0-9;]*m)/);
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0) {
+      if (parts[i].trim() && !bg) return false;
+      continue;
+    }
+    const codes = parts[i].slice(2, -1).split(";");
+    for (let k = 0; k < codes.length; k++) {
+      const c = codes[k];
+      if (c === "38" || c === "48") {
+        if (c === "48") bg = saw = true;
+        k += codes[k + 1] === "5" ? 2 : 4; // 38/48;5;n or 38/48;2;r;g;b
+      } else if (c === "49" || c === "0" || c === "") bg = false;
+      else if (/^(4[0-7]|10[0-7])$/.test(c)) bg = saw = true;
+    }
+  }
+  return saw;
+}
+
 export function styleAnsi(line: string): string {
   const v = visibleOf(line);
   if (!v.trim()) return line;
+  // tachibot's heading pills (a background behind the whole line) → the reader's ▍ / ◆ headings
+  if (isPill(line) && v.trim().length < 90) {
+    const t = v.trim();
+    return /^[•◦▪‣·-]\s/.test(t) ? `${SUB}◆ ${t.replace(/^[•◦▪‣·-]\s+/, "")}\x1b[0m` : `${HEAD}${t}\x1b[0m`;
+  }
+  // a bold title trailed by a rule ("🛠 SUMMARY ───") is a heading too
+  const ruled = /^\s*\x1b\[1m/.test(line) ? /^\s*(.{2,80}?)\s*─{2,}\s*$/.exec(v) : null;
+  if (ruled) return `${HEAD}${ruled[1]}\x1b[0m`;
   // a whole line in bold (and nothing else) is a heading
   if (/^\s*\x1b\[1m[^\x1b]+\x1b\[(22|0)m\s*$/.test(line) && v.trim().length < 90) return `${HEAD}${v.trim()}\x1b[0m`;
   // "Key: value" at line start (short Capitalized key) → the key dimmed
@@ -427,14 +459,21 @@ function detailLines(it: Item, width: number, reviewing: boolean, expanded = fal
         wrap(visibleOf(styled), width - 2).forEach((row, k) => lines.push({ text: `${HEAD}${k ? "  " : "▍ "}${row}\x1b[0m`, ansi: true }));
         continue;
       }
+      if (styled.startsWith(SUB)) {
+        if (lines.length && lines[lines.length - 1].text !== "") lines.push({ text: "" });
+        wrap(visibleOf(styled), width).forEach((row, k) => lines.push({ text: `${SUB}${k ? "  " : ""}${row}\x1b[0m`, ansi: true }));
+        continue;
+      }
       if (!src.includes("\x1b") && src.length > 220) {
         // a dense plain paragraph: reader mode — "(1) … (2) …" lists, bold "Label:" lines
         for (const l of renderMarkdown(readable(src), width)) lines.push({ text: l, ansi: true });
         continue;
       }
-      wrapAnsi(linkifyAnsi(styled), width, { hard: true, trim: false })
+      // list items wrap under their text, not under the bullet
+      const hang = /^\s*(?:[•◦▪‣-]|\d{1,2}[.)])\s+/.exec(visibleOf(styled))?.[0].length ?? 0;
+      wrapAnsi(linkifyAnsi(styled), width - hang, { hard: true, trim: false })
         .split("\n")
-        .forEach((row, k) => lines.push({ text: k ? row.replace(/^((?:\x1b\[[0-9;]*m)*) /, "$1") : row, ansi: true }));
+        .forEach((row, k) => lines.push({ text: k ? " ".repeat(hang) + row.replace(/^((?:\x1b\[[0-9;]*m)*) +/, "$1") : row, ansi: true }));
     }
   } else if (out && c.status === "error") {
     push(out, { color: "#ff7b72" });
