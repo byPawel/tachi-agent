@@ -155,3 +155,13 @@ describe("drag selection outside panes", () => {
     expect(selectText(["tachi-watch · 18d7a7df", "40 calls  1 errors"], { x: 1, y: 1 }, { x: 10, y: 2 })).toBe("");
   });
 });
+
+describe("card registry", () => {
+  it("a registered view adds its summary for matching tools only", async () => {
+    const { registerCard, toolCard, renderersFor } = await import("../cards.js");
+    registerCard({ name: "test-view", match: /^my_tool$/, summary: (c) => [`seen ${c.tool} ${c.output.length}`] });
+    expect(toolCard("tachibot · my_tool", "abc", 40)).toContain("seen my_tool 3");
+    expect(toolCard("tachibot · other_tool", "abc", 40)).not.toContain("seen my_tool 3");
+    expect(renderersFor("tachibot · planner_maker").map((r) => r.name)).toContain("planner");
+  });
+});

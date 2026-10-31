@@ -18,7 +18,7 @@ import { Box, Text, measureElement, render, useApp, useInput, useStdout, type DO
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import { CardHeader, FollowUps, Shimmer, Spinner, TabBar, Tag, tabSpans, THEME, gauge, shortModel, sparkline, stepsLine, toolTimeoutMs, useFrame, type View } from "./components.js";
-import { confidenceMeter, councilPanel, councilPhases, parsePlanner, plannerCard, toolCard, type PlannerStepInfo } from "./cards.js";
+import { confidenceMeter, councilPanel, councilPhases, parsePlanner, renderersFor, setPlannerSteps, toolCard, type PlannerStepInfo } from "./cards.js";
 import { rankTechniques, type Technique } from "./prompts.js";
 import { linkifyAnsi, renderMarkdown } from "./md.js";
 import type { Card } from "./store.js";
@@ -371,11 +371,10 @@ function detailLines(it: Item, width: number, reviewing: boolean, expanded = fal
   }
 
   // planner_maker (as designed): the step block heads the card, above its input
-  const plannerTop = c.status !== "error" && /planner_maker$/.test(c.title) ? parsePlanner(visibleOf(c.fullAnsi ?? c.full ?? c.output ?? "")) : undefined;
-  if (plannerTop) {
-    for (const l of plannerCard(plannerTop, width, plannerPhases)) lines.push({ text: l, ansi: true });
-    lines.push({ text: "" });
-  }
+  // registered tool views: their headline block goes above INPUT (the planner's step block)
+  const ctx = { tool: c.title.replace(/^tachibot · /, ""), output: visibleOf(c.fullAnsi ?? c.full ?? c.output ?? ""), width };
+  const views = c.status === "error" || c.status === "running" ? [] : renderersFor(c.title);
+  for (const l of views.flatMap((v) => v.top?.(ctx) ?? [])) lines.push({ text: l, ansi: true });
 
   section("INPUT", "#79c0ff");
   // arguments are often markdown (council briefs, perspectives): render them, argument names dimmed
@@ -394,11 +393,13 @@ function detailLines(it: Item, width: number, reviewing: boolean, expanded = fal
     for (const l of summary) lines.push({ text: l, ansi: true });
     lines.push({ text: "" });
   }
-  const planner = c.status !== "error" && /planner_maker$/.test(c.title) ? parsePlanner(visibleOf(c.fullAnsi ?? out)) : undefined;
-  if (planner) {
-    // planner_maker: its step block is on top of the card; here only whatever else it printed
-    if (planner.rest) for (const l of renderMarkdown(readable(planner.rest), width)) lines.push({ text: l, ansi: true });
-    else lines.push({ text: "(the step block above is the whole output)", dim: true });
+  // a registered view may replace the output text (the planner: what the step block didn't cover)
+  const custom = views.map((v) => v.output?.(ctx)).find((x) => x !== undefined);
+  const planner = /planner_maker$/.test(c.title) ? parsePlanner(ctx.output) : undefined;
+  if (custom) {
+    for (const l of custom) lines.push({ text: l, ansi: true });
+  } else if (planner?.rest) {
+    for (const l of renderMarkdown(readable(planner.rest), width)) lines.push({ text: l, ansi: true });
   } else if (c.fullAnsi && c.status !== "error") {
     // tachibot's own terminal rendering: colored headers, tables, bullets
     for (const src of fitAnsi(reflow(c.fullAnsi), width).split("\n")) {
@@ -1753,6 +1754,7 @@ function App({ controller }: { controller: WatchController }) {
       if (p) m.set(p.step, { phase: p.phase, action: p.next?.desc, tool: p.next?.tool });
     }
     plannerPhases = m;
+    setPlannerSteps(m);
   }, [allItems]);
   const qgroups = useMemo(() => questionGroups(items, s.prompts, s.labels), [items, s.prompts, s.labels]);
   const openGroup = qgroups.find((g) => idx >= g.start && idx <= g.end);

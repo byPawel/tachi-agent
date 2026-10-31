@@ -144,19 +144,54 @@ function tableBars(output: string, width: number): string[] {
 }
 
 /** The visual summary for one call's output; [] when the tool has no renderer or the output doesn't fit it. */
-export function toolCard(tool: string, output: string, width: number): string[] {
-  const t = tool.replace(/^tachibot · /, "");
-  const head = degraded(output);
-  let body: string[] = [];
-  if (t === "jev_decide") body = jevBars(output, width);
-  else if (/search|perplexity_ask|perplexity_reason/.test(t)) body = sourceChips(output, width);
-  else if (t === "diff_review" || t === "security_review" || t === "openai_code_review") body = mergeBadge(output);
-  else if (/planner|plan_critique/.test(t)) body = checklist(output, width);
-  else if (t === "debug_triage") body = ranked(output);
-  else if (t === "jury") body = juryRoster(output);
-  else if (t === "usage_stats") body = tableBars(output, width);
-  return [...head, ...body];
+// --- card renderer registry ------------------------------------------------------
+// A tool's look in the card is a registered renderer, so a new tool view is one
+// registerCard() call — no edits to ui.tsx. Every matching renderer contributes.
+
+export interface CardContext {
+  /** the tool name without the "tachibot · " prefix */
+  tool: string;
+  /** the call's output as plain text */
+  output: string;
+  width: number;
 }
+
+export interface CardRenderer {
+  name: string;
+  match: RegExp;
+  /** lines above INPUT — the call's headline view (the planner's step block) */
+  top?: (ctx: CardContext) => string[];
+  /** a graphic above the output text (bars, chips, badges) */
+  summary?: (ctx: CardContext) => string[];
+  /** replaces the default output text; undefined keeps the default */
+  output?: (ctx: CardContext) => string[] | undefined;
+}
+
+const RENDERERS: CardRenderer[] = [];
+
+/** Register a tool view. Later registrations add to earlier ones; nothing is replaced. */
+export function registerCard(r: CardRenderer): void {
+  RENDERERS.push(r);
+}
+
+export function renderersFor(tool: string): CardRenderer[] {
+  const t = tool.replace(/^tachibot · /, "");
+  return RENDERERS.filter((r) => r.match.test(t));
+}
+
+/** The summary graphics for a call: the fallback banner, then every matching renderer's summary. */
+export function toolCard(tool: string, output: string, width: number): string[] {
+  const ctx = { tool: tool.replace(/^tachibot · /, ""), output, width };
+  return [...degraded(output), ...renderersFor(tool).flatMap((r) => r.summary?.(ctx) ?? [])];
+}
+
+registerCard({ name: "jev", match: /^jev_decide$/, summary: (c) => jevBars(c.output, c.width) });
+registerCard({ name: "sources", match: /search|perplexity_ask|perplexity_reason/, summary: (c) => sourceChips(c.output, c.width) });
+registerCard({ name: "verdict", match: /^(diff_review|security_review|openai_code_review)$/, summary: (c) => mergeBadge(c.output) });
+registerCard({ name: "checklist", match: /planner|plan_critique/, summary: (c) => checklist(c.output, c.width) });
+registerCard({ name: "triage", match: /^debug_triage$/, summary: (c) => ranked(c.output) });
+registerCard({ name: "jury", match: /^jury$/, summary: (c) => juryRoster(c.output) });
+registerCard({ name: "usage", match: /^usage_stats$/, summary: (c) => tableBars(c.output, c.width) });
 
 // --- council --------------------------------------------------------------------
 
@@ -470,3 +505,23 @@ export function plannerCard(p: PlannerStep, width: number, steps: Map<number, Pl
   }
   return out;
 }
+
+/** planner_maker steps seen this session (step → phase/tool), set by the UI as calls arrive */
+let plannerSteps = new Map<number, PlannerStepInfo>();
+export function setPlannerSteps(m: Map<number, PlannerStepInfo>): void {
+  plannerSteps = m;
+}
+
+registerCard({
+  name: "planner",
+  match: /^planner_maker$/,
+  top: (c) => {
+    const p = parsePlanner(c.output);
+    return p ? [...plannerCard(p, c.width, plannerSteps), ""] : [];
+  },
+  output: (c) => {
+    const p = parsePlanner(c.output);
+    if (!p) return undefined;
+    return p.rest ? undefined : ["\x1b[2m(the step block above is the whole output)\x1b[22m"];
+  },
+});
