@@ -300,7 +300,8 @@ export function styleAnsi(line: string): string {
     return /^[•◦▪‣·-]\s/.test(t) ? `${SUB}◆ ${t.replace(/^[•◦▪‣·-]\s+/, "")}\x1b[0m` : `${HEAD}${t}\x1b[0m`;
   }
   // a bold title trailed by a rule ("🛠 SUMMARY ───") is a heading too
-  const ruled = /^\s*\x1b\[1m/.test(line) ? /^\s*(.{2,80}?)\s*─{2,}\s*$/.exec(v) : null;
+  const t0 = v.trim();
+  const ruled = t0.length <= 90 && /^\s*\x1b\[1m/.test(line) ? /^(\S.{1,79}?) *─{2,}$/.exec(t0) : null;
   if (ruled) return `${HEAD}${ruled[1]}\x1b[0m`;
   // a whole line in bold (and nothing else) is a heading
   if (/^\s*\x1b\[1m[^\x1b]+\x1b\[(22|0)m\s*$/.test(line) && v.trim().length < 90) return `${HEAD}${v.trim()}\x1b[0m`;
@@ -470,7 +471,7 @@ function detailLines(it: Item, width: number, reviewing: boolean, expanded = fal
         continue;
       }
       // list items wrap under their text, not under the bullet
-      const hang = /^\s*(?:[•◦▪‣-]|\d{1,2}[.)])\s+/.exec(visibleOf(styled))?.[0].length ?? 0;
+      const hang = Math.min(/^\s*(?:[•◦▪‣-]|\d{1,2}[.)])\s+/.exec(visibleOf(styled))?.[0].length ?? 0, Math.floor(width / 2));
       wrapAnsi(linkifyAnsi(styled), width - hang, { hard: true, trim: false })
         .split("\n")
         .forEach((row, k) => lines.push({ text: k ? " ".repeat(hang) + row.replace(/^((?:\x1b\[[0-9;]*m)*) +/, "$1") : row, ansi: true }));
