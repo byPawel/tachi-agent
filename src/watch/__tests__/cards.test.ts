@@ -178,3 +178,17 @@ describe("card registry", () => {
     expect(renderersFor("tachibot · planner_maker").map((r) => r.name)).toContain("planner");
   });
 });
+
+describe("algo and testgen views", () => {
+  it("complexity table and test list", async () => {
+    const { toolCard } = await import("../cards.js");
+    const strip = (l: string[]) => l.join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+    const algo = strip(toolCard("deepseek_algo", "**Current**: time O(n^2), space O(1)\n**Proposed**: time O(n log n), space O(n)\n", 70));
+    expect(algo).toContain("COMPLEXITY");
+    expect(algo).toMatch(/Current\s+O\(n\^2\)\s+O\(1\)/);
+    expect(algo).toMatch(/Proposed\s+O\(n log n\)\s+O\(n\)/);
+    const tests = strip(toolCard("testgen", 'it("keeps order", () => {})\ntest("handles empty", () => {})\n', 60));
+    expect(tests).toContain("TESTS  2");
+    expect(tests).toContain("● keeps order");
+  });
+});

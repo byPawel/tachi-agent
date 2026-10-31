@@ -381,3 +381,11 @@ describe("human time", () => {
     expect(humanTime("2026-07-01", Date.parse("2026-07-03T00:00:00Z"))).toMatch(/Jul 2026 · 2 days ago/);
   });
 });
+
+describe("search highlight", () => {
+  it("marks hits between escapes only", async () => {
+    const { highlightAnsi } = await import("../ui.js");
+    const out = highlightAnsi("\x1b[1mInput ownership\x1b[22m and input", ["input"]);
+    expect(out).toBe("\x1b[1m\x1b[48;2;92;72;18mInput\x1b[49m ownership\x1b[22m and \x1b[48;2;92;72;18minput\x1b[49m");
+  });
+});

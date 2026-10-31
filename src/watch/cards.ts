@@ -218,6 +218,31 @@ export function toolCard(tool: string, output: string, width: number): string[] 
   return [...degraded(output), ...renderersFor(tool).flatMap((r) => r.summary?.(ctx) ?? [])];
 }
 
+/** algo tools: every "time / space … O(…)" the answer states, as a small table. */
+function complexityView(output: string): string[] {
+  const rows: Array<[string, string, string]> = [];
+  for (const line of output.split("\n")) {
+    const time = /time[^\n]{0,40}?(O\([^)]{1,30}\))/i.exec(line)?.[1];
+    const space = /space[^\n]{0,40}?(O\([^)]{1,30}\))/i.exec(line)?.[1];
+    if (!time && !space) continue;
+    const label = line.replace(/\*\*/g, "").replace(/^[\s#>*|-]+/, "").split(/[:—|]/)[0].trim().slice(0, 24) || "—";
+    rows.push([label, time ?? "", space ?? ""]);
+    if (rows.length >= 5) break;
+  }
+  if (!rows.length) return [];
+  const good = (o: string) => (/O\((1|log\s?n|n|n\s?log\s?n)\)/i.test(o) ? green(o) : /\^|²|³|2\^n|n!/.test(o) ? `\x1b[38;2;255;123;114m${o}\x1b[39m` : yellow(o));
+  return [bold("COMPLEXITY"), `${dim("".padEnd(24))}  ${dim("time".padEnd(14))}${dim("space")}`, ...rows.map(([l, t, sp]) => `${l.padEnd(24)}  ${(t ? good(t) : dim("—")) + " ".repeat(Math.max(1, 14 - (t || "—").length))}${sp ? good(sp) : dim("—")}`)];
+}
+
+/** testgen: how many tests, their names. */
+function testsView(output: string, width: number): string[] {
+  const names = [...output.matchAll(/\b(?:it|test)\(\s*["'`]([^"'`\n]{3,80})["'`]|def (test_\w+)/g)].map((m) => m[1] ?? m[2]);
+  if (!names.length) return [];
+  return [bold(`TESTS  ${names.length}`), ...names.slice(0, 8).map((n) => `${green("●")} ${n.length > width - 4 ? `${n.slice(0, width - 5)}…` : n}`), ...(names.length > 8 ? [dim(`+${names.length - 8} more in the output`)] : [])];
+}
+
+registerCard({ name: "complexity", match: /^(deepseek_algo|qwen_algo|qwen_competitive)$/, summary: (c) => complexityView(c.output) });
+registerCard({ name: "tests", match: /^testgen$/, summary: (c) => testsView(c.output, c.width) });
 registerCard({ name: "jev", match: /^jev_decide$/, summary: (c) => jevBars(c.output, c.width) });
 registerCard({ name: "sources", match: /search|perplexity_ask|perplexity_reason/, summary: (c) => sourceChips(c.output, c.width) });
 registerCard({ name: "verdict", match: /^(diff_review|security_review|openai_code_review)$/, summary: (c) => reviewView(c.output, c.width) });

@@ -428,7 +428,11 @@ function detailLines(it: Item, width: number, reviewing: boolean, expanded = fal
       .replace(/^-{3,}\s*(.+?)\s*-{3,}\s*$/gm, "### $1")
       .replace(/^[=\-─]{6,}\s*$/gm, "");
     for (const l of renderMarkdown(readable(md), width)) lines.push({ text: l, ansi: true });
-  } else lines.push({ text: c.status === "running" ? "waiting for the answer…" : "(empty)", dim: true });
+  } else if (c.status === "running") {
+    // a skeleton while the call runs: the answer's shape, not a blank
+    for (const w of [0.7, 0.92, 0.55, 0.8]) lines.push({ text: "\x1b[38;2;33;38;45m" + "▆".repeat(Math.max(4, Math.floor(width * w))) + "\x1b[39m", ansi: true });
+    lines.push({ text: "waiting for the answer…", dim: true });
+  } else lines.push({ text: "(empty)", dim: true });
 
   // OpenUI Accordion, "behind the scenes": the model calls, folded until ctrl+b
   if (it.models.length) {
@@ -547,6 +551,16 @@ export function chatLines(cards: Card[], asking: { question: string; since: numb
 const detailCache = new Map<string, Line[]>();
 /** planner_maker phases seen this session, step → phase — the planner card names its segments with them */
 let plannerPhases = new Map<number, PlannerStepInfo>();
+
+/** Search matches marked in a (possibly ANSI) line: an amber background on each hit, escapes untouched. */
+export function highlightAnsi(line: string, words: string[]): string {
+  if (!words.length) return line;
+  const re = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+  return line
+    .split(/(\x1b\[[0-9;]*m|\x1b\]8;;[^\x07]*\x07)/)
+    .map((part, i) => (i % 2 ? part : part.replace(re, "\x1b[48;2;92;72;18m$1\x1b[49m")))
+    .join("");
+}
 
 export type CardTab = "OUTPUT" | "INPUT" | "MODELS";
 
@@ -994,7 +1008,7 @@ function MemoryView({ cwd, files, sel, off, width, rows, dokoroSearch, focus, fo
 
 /** Every key, per tab — the help overlay renders from this so it cannot drift from what works. */
 export const KEYS: Record<View | "all", Array<[string, string]>> = {
-  all: [["Tab / Shift+Tab", "next / previous tab (HOME → CALLS → CHAT → PROMPTS → MEMORY)"], ["click", "a tab, a call, a file, a technique, a pane"], ["^Y", "copy the open call / file / last answer"], ["drag", "select text: copied, and attached to your next question (Esc drops)"], ["^X", "terminal select mode (Esc returns)"], ["click a link", "opens in Chrome (TACHI_BROWSER to change)"], ["Esc", "back out one layer — typed text, then the tab → HOME"], ["^F", "search this tab"], ["^T", "compact / normal density"], ["?", "this help"], ["^S · ^E", "send / edit the brain's proposal to Claude"], ["@claude <text>", "send your own text to Claude"], ["^C", "quit"]],
+  all: [["Tab / Shift+Tab", "next / previous tab (HOME → CALLS → CHAT → PROMPTS → MEMORY)"], ["click", "a tab, a call, a file, a technique, a pane"], ["^Y", "copy the open call / file / last answer"], ["^P · ^K", "pin the open call to the top · export it as markdown (dokoro/daily)"], ["^N", "solo chat: hide the brain's notes"], ["drag", "select text: copied, and attached to your next question (Esc drops)"], ["^X", "terminal select mode (Esc returns)"], ["click a link", "opens in Chrome (TACHI_BROWSER to change)"], ["Esc", "back out one layer — typed text, then the tab → HOME"], ["^F", "search this tab"], ["^T", "compact / normal density"], ["?", "this help"], ["^S · ^E", "send / edit the brain's proposal to Claude"], ["@claude <text>", "send your own text to Claude"], ["^C", "quit"]],
   home: [["↑↓", "open the calls"], ["1-3", "ask a suggested question"]],
   calls: [["←→", "split: focus list · card · chat (keys act on the focused pane)"], ["↑↓", "move in the focused pane (list: select · card: line · chat: scroll)"], ["g / G", "top / end of the focused pane (input empty)"], ["PgUp/PgDn", "scroll the card a page"], ["wheel", "scrolls the pane under the pointer"], ["^B", "behind the scenes (model calls)"], ["/label <name>", "name this question group"], ["/layout auto|split|stack", "columns"], ["Enter", "ask the brain about this call"]],
   chat: [["↑↓ PgUp/PgDn", "scroll — scrolling up pauses, ↓ to the end resumes"], ["1-3", "ask a follow-up"], ["Enter", "ask the brain"]],
@@ -1186,6 +1200,8 @@ function App({ controller }: { controller: WatchController }) {
   const [reviewing, setReviewing] = useState<string | null>(null);
   // the open card's tab — every card opens on OUTPUT
   const [cardTab, setCardTab] = useState<CardTab>("OUTPUT");
+  // pinned calls stay on top of the list (^P)
+  const [starred, setStarred] = useState<Set<string>>(() => new Set());
   const reviewAt = useRef(0);
   const [, setFoldTick] = useState(0);
   const [memFolded, setMemFolded] = useState<Set<string>>(() => new Set());
@@ -1310,6 +1326,21 @@ function App({ controller }: { controller: WatchController }) {
   const pulsing = nowMs - focusAt < 650;
   const focusColor = (accent: string) => (pulsing && frame % 2 === 0 ? "#f0f6fc" : accent);
   const current = idx >= 0 ? items[idx] : undefined;
+  // a long call that finishes: ring the terminal bell and say so in the footer
+  const running = useRef(new Set<string>());
+  useEffect(() => {
+    for (const c of s.cards) {
+      if (c.type !== "tool") continue;
+      if (c.status === "running") { running.current.add(c.key); continue; }
+      if (!running.current.has(c.key)) continue;
+      running.current.delete(c.key);
+      if ((c.ms ?? 0) < 60_000) continue;
+      const took = `${Math.floor((c.ms ?? 0) / 60_000)}m${String(Math.round(((c.ms ?? 0) % 60_000) / 1000)).padStart(2, "0")}`;
+      if (process.stdout.isTTY) process.stdout.write("\x07");
+      setToast({ text: `${c.status === "error" ? "✗" : "✓"} ${c.title.replace(/^tachibot · /, "")} finished · ${took}`, at: Date.now() });
+    }
+  }, [s.cards]);
+
   // every card opens on OUTPUT
   const currentKey = current?.call?.key;
   useEffect(() => setCardTab("OUTPUT"), [currentKey]);
@@ -1385,6 +1416,32 @@ function App({ controller }: { controller: WatchController }) {
   const globalLayer: Layer = (ch, key) => {
     if (key.ctrl && ch === "x") return did(() => setSelectMode((v) => !v));
     if (key.ctrl && ch === "n" && (view === "chat" || threeCol)) return did(() => setChatSolo((v) => !v));
+    // ^P pins / unpins the open call · ^K exports it as markdown
+    if (key.ctrl && ch === "p" && current?.call) {
+      const k = current.call.key;
+      return did(() => {
+        setStarred((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+        setToast({ text: starred.has(k) ? "☆ unpinned" : "★ pinned — it stays on top of the list", at: Date.now() });
+      });
+    }
+    if (key.ctrl && ch === "k" && current?.call) {
+      const c = current.call;
+      return did(() => {
+        try {
+          const tool = c.title.replace(/^tachibot · /, "");
+          const stamp = new Date(c.ts).toISOString().slice(0, 16).replace(/[T:]/g, "-");
+          const dir = fs.existsSync(`${s.cwd}/dokoro/daily`) ? `${s.cwd}/dokoro/daily` : `${s.cwd}/.tachi/exports`;
+          fs.mkdirSync(dir, { recursive: true });
+          const file = `${dir}/${stamp}-${tool}.md`;
+          const body = `---\ntool: ${tool}\nstatus: ${c.status}\ndate: ${new Date(c.ts).toISOString()}\n---\n\n# ${tool}\n\n## Input\n\n${c.inputFull ?? c.input ?? ""}\n\n## Output\n\n${visibleOf(c.fullAnsi ?? c.full ?? c.output ?? "")}\n`;
+          fs.writeFileSync(file, body);
+          copy(file, "the export path");
+          setToast({ text: `→ exported ${file.replace(`${s.cwd}/`, "")} · path copied`, at: Date.now() });
+        } catch (e) {
+          setToast({ text: `✗ export failed: ${(e as Error).message}`, at: Date.now() });
+        }
+      });
+    }
     if (ch === "?" && !typing && !searching) return did(() => setHelp(true));
     if (key.ctrl && ch === "t") return did(() => setCompactPref(!dense));
     if (key.ctrl && ch === "g") return did(() => setView("home"));
@@ -1773,6 +1830,8 @@ function App({ controller }: { controller: WatchController }) {
     const activeTab = tabsShown.includes(cardTab) ? cardTab : "OUTPUT";
     const tabBody = byTab[activeTab].filter((l, i) => !(i === 0 && l.section)); // the tab names the part
     const detail = dense ? tabBody.filter((l) => l.text !== "") : tabBody;
+    // a CALLS search marks its matches in the open card
+    const hitWords = queries.calls.trim() ? queries.calls.trim().split(/\s+/).filter((x) => x.length > 1) : [];
     const maxOffset = Math.max(0, detail.length - detailRoom);
     cardMax.current = maxOffset;
     const off = Math.min(offset, maxOffset);
@@ -1812,7 +1871,7 @@ function App({ controller }: { controller: WatchController }) {
         {shown.map((l, i) => (
           <Text key={i} wrap="truncate-end">
             {l.bar ? <Text color={l.bar}>▎ </Text> : null}
-            {l.ansi ? l.text || " " : <Text color={l.color} bold={l.bold} dimColor={l.dim}>{l.text || " "}</Text>}
+            {l.ansi ? highlightAnsi(l.text, hitWords) || " " : <Text color={l.color} bold={l.bold} dimColor={l.dim}>{highlightAnsi(l.text, hitWords) || " "}</Text>}
           </Text>
         ))}
         {detail.length > detailRoom ? (
@@ -1909,6 +1968,15 @@ function App({ controller }: { controller: WatchController }) {
             const rowsOut: ReactNode[] = [];
             const targets: number[] = []; // the item index each row opens (a header opens its question's last call)
             let at = 0;
+            const pins = items.map((x, k) => [x, k] as const).filter(([x]) => x.call && starred.has(x.call.key));
+            if (pins.length) {
+              rowsOut.push(<Box key="pinhead" height={1}><Text color={THEME.note} bold>{`★ PINNED  ${pins.length}`}</Text></Box>);
+              targets.push(pins[0][1]);
+              for (const [x, k] of pins) {
+                rowsOut.push(rowNode(x, k, false, true));
+                targets.push(k);
+              }
+            }
             for (const g of qgroups) {
               const open = g === openGroup;
               rowsOut.push(groupHeader(g, open, listW - 4));
@@ -2034,7 +2102,7 @@ function App({ controller }: { controller: WatchController }) {
           </Text>
         ))}
       </Box>
-      {dragTo ? <Text wrap="truncate-end"><Text backgroundColor={THEME.chat} color="#0d1117" bold>{" ✎ SELECTING "}</Text><Text color={THEME.text}>{"  release to copy · the text then rides along with your next question"}</Text></Text> : selectMode ? <Text wrap="truncate-end"><Text backgroundColor={THEME.memory} color="#0d1117" bold>{" ✎ SELECT "}</Text><Text color={THEME.text}>{"  drag to select · ⌘C copy · ⌘-click links · "}</Text><Text color={THEME.memory} bold>{"Esc / ^X"}</Text><Text color={THEME.muted}>{` back to scroll & click · auto in ${Math.max(0, Math.ceil((SELECT_MS - (nowMs - selectAt.current)) / 1000))}s`}</Text></Text> : toast && nowMs - toast.at < 2500 ? <Text color={THEME.ok} bold wrap="truncate-end">{toast.text}<Text color={THEME.muted} bold={false}>{"  · paste it anywhere"}</Text></Text> : <Text dimColor wrap="truncate-end">
+      {dragTo ? <Text wrap="truncate-end"><Text backgroundColor={THEME.chat} color="#0d1117" bold>{" ✎ SELECTING "}</Text><Text color={THEME.text}>{"  release to copy · the text then rides along with your next question"}</Text></Text> : selectMode ? <Text wrap="truncate-end"><Text backgroundColor={THEME.memory} color="#0d1117" bold>{" ✎ SELECT "}</Text><Text color={THEME.text}>{"  drag to select · ⌘C copy · ⌘-click links · "}</Text><Text color={THEME.memory} bold>{"Esc / ^X"}</Text><Text color={THEME.muted}>{` back to scroll & click · auto in ${Math.max(0, Math.ceil((SELECT_MS - (nowMs - selectAt.current)) / 1000))}s`}</Text></Text> : toast && nowMs - toast.at < 2500 ? <Text color={THEME.ok} bold wrap="truncate-end">{toast.text}<Text color={THEME.muted} bold={false}>{toast.text.startsWith("✓ copied") ? "  · paste it anywhere" : ""}</Text></Text> : <Text dimColor wrap="truncate-end">
         <Text color="#79c0ff">{view}</Text>
         {view === "calls" ? (sel === null
           ? <Text color={THEME.ok}> ● following</Text>
@@ -2052,7 +2120,7 @@ function App({ controller }: { controller: WatchController }) {
           : size.cols < 80
             ? " · Tab · ↑↓ · ^F · Esc home"
             : wide
-              ? ` · click a call · ←→ focus ${focusPane} · ↑↓ move · drag select · ^Y copy · click ▾ to fold · ? keys`
+              ? ` · click a call · ←→ focus ${focusPane} · ↑↓ move · drag select · ^Y copy · ^P pin · ^K export · ? keys`
               : " · Tab chat · ↑↓ select · ^F search · ^B models · ^T density · ? keys · Esc home"}
       </Text>}
     </Box>
