@@ -83,7 +83,7 @@ export interface QuestionGroup {
 }
 
 /** Text the harness injects as a "user" turn — never a question of yours, so never a group. */
-const SYSTEM_PROMPT = /^(A session-scoped Stop hook|This session is being continued|Stop hook feedback|\[SYSTEM NOTIFICATION|Caveat:|<local-command|<task-notification)/;
+const SYSTEM_PROMPT = /^(A session-scoped Stop hook|This session is being continued|The summarized conversation|Stop hook feedback|\[SYSTEM NOTIFICATION|Caveat:|<local-command|<task-notification)/;
 
 /**
  * Your prompt as a group label: image tags, pasted blocks and system tags removed; a skill
@@ -92,7 +92,8 @@ const SYSTEM_PROMPT = /^(A session-scoped Stop hook|This session is being contin
  */
 export function cleanPrompt(text: string): string | undefined {
   const raw = text.trim();
-  if (SYSTEM_PROMPT.test(raw)) return undefined;
+  // harness text can open with a lone tag (<artifact-content-…/>) before the system sentence
+  if (SYSTEM_PROMPT.test(raw.replace(/^(?:<[a-z][\w-]*(?:\s[^>]*)?\/?>\s*)+/, ""))) return undefined;
   // a skill / slash command expansion (the watcher keeps prompts flattened and clipped)
   const skill = /Base directory for this skill: \S*\/([\w:-]+)/.exec(raw) ?? /^`?(?:\/)([\w:-]+)`? was invoked/.exec(raw) ?? /<command-name>\/?([\w:-]+)<\/command-name>/.exec(raw);
   if (skill) {

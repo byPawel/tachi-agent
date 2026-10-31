@@ -389,3 +389,11 @@ describe("search highlight", () => {
     expect(out).toBe("\x1b[1m\x1b[48;2;92;72;18mInput\x1b[49m ownership\x1b[22m and \x1b[48;2;92;72;18minput\x1b[49m");
   });
 });
+
+describe("system prompts as labels", () => {
+  it("a context summary that opens with a tag is not a question label", async () => {
+    const { cleanPrompt } = await import("../ui.js");
+    expect(cleanPrompt("<artifact-content-authored-by-others/>\nThe summarized conversation included Artifact content…")).toBeUndefined();
+    expect(cleanPrompt("make it nicer")).toBe("make it nicer");
+  });
+});
