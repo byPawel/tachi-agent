@@ -1846,7 +1846,7 @@ function App({ controller }: { controller: WatchController }) {
     );
   };
 
-  const cardNode = (it: Item, w: number, room: number): ReactNode => {
+  const cardNode = (it: Item, w: number, room: number, padLeft = 1): ReactNode => {
     if (it.loose) {
       return (
         <Box flexDirection="column" paddingLeft={1}>
@@ -1894,7 +1894,7 @@ function App({ controller }: { controller: WatchController }) {
     const above = off > 0;
     const shown = detail.slice(off, off + detailRoom - (detail.length > detailRoom ? 1 : 0) - (above ? 1 : 0));
     return (
-      <Box flexDirection="column" width={w} flexShrink={0} paddingX={1} borderStyle={wide && focusPane === "card" ? "bold" : "round"} borderColor={wide && focusPane === "card" ? focusColor(cardColor(c.status)) : wide ? "#3d4a5c" : cardColor(c.status)}>
+      <Box flexDirection="column" width={w} flexShrink={0} paddingLeft={padLeft} paddingRight={1} borderStyle={wide && focusPane === "card" ? "bold" : "round"} borderColor={wide && focusPane === "card" ? focusColor(cardColor(c.status)) : wide ? "#3d4a5c" : cardColor(c.status)}>
         {wide ? (focusPane === "card"
           ? <Text wrap="truncate-end"><Text backgroundColor={cardColor(c.status)} color="#0d1117" bold>{" CARD "}</Text><Text color={THEME.muted}> focused · ↑↓ line · PgUp/Dn page · g/G</Text></Text>
           : <Text wrap="truncate-end"><Text backgroundColor={THEME.tagBg} color={cardColor(c.status)} bold>{" CARD "}</Text><Text color={THEME.muted}> click or → to scroll it</Text></Text>) : null}
