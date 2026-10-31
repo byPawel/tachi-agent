@@ -1169,6 +1169,7 @@ function App({ controller }: { controller: WatchController }) {
   const [chatSolo, setChatSolo] = useState(false);
   // a long proposal is reviewed whole before it can be sent: the first ^S expands it
   const [reviewing, setReviewing] = useState<string | null>(null);
+  const reviewAt = useRef(0);
   const [, setFoldTick] = useState(0);
   const [memFolded, setMemFolded] = useState<Set<string>>(() => new Set());
   useEffect(() => {
@@ -1318,7 +1319,9 @@ function App({ controller }: { controller: WatchController }) {
   // the proposal is what you approve: 3 lines visible (never 1), the rest via ctrl+e
   const proposalLines = s.proposal ? wrap(s.proposal, width - 4) : [];
   // under review the box shows every line (proposals are capped, so they fit); else 3 lines
-  const proposalShown = reviewing && reviewing === s.proposal ? proposalLines
+  const reviewRoom = Math.max(3, rows - 14);
+  const reviewFits = proposalLines.length <= reviewRoom;
+  const proposalShown = reviewing && reviewing === s.proposal ? (reviewFits ? proposalLines : [...proposalLines.slice(0, reviewRoom - 1), "… too long for this pane — ^E to read it whole"])
     : proposalLines.length > 3 ? [...proposalLines.slice(0, 2), `${proposalLines[2].slice(0, Math.max(0, width - 26))}… (^S: read all)`] : proposalLines;
   const proposalRows = s.proposal ? 3 + proposalShown.length : 0;
   // the input wraps onto up to 3 lines (the newest text stays visible)
@@ -1345,7 +1348,9 @@ function App({ controller }: { controller: WatchController }) {
     // a proposal longer than its 3 visible lines is never sent unseen: the first ^S opens it whole
     if (key.ctrl && ch === "s") return did(() => {
       if (Date.now() - shownAt <= 1000) return;
-      if (proposalLines.length > 3 && reviewing !== s.proposal) { setReviewing(s.proposal!); return; }
+      if (proposalLines.length > 3 && reviewing !== s.proposal) { reviewAt.current = Date.now(); setReviewing(s.proposal!); return; }
+      // the expanded text must actually fit, and be on screen a moment, before ^S sends it
+      if (reviewing === s.proposal && (!reviewFits || Date.now() - reviewAt.current < 900)) return;
       setReviewing(null);
       controller.send(s.proposal!);
     });
@@ -1956,7 +1961,7 @@ function App({ controller }: { controller: WatchController }) {
       <Box flexDirection="column" flexGrow={1} overflow="hidden">{body}</Box>
       {s.proposal ? (
         <Box borderStyle="round" borderColor="#e3b341" paddingX={1} flexDirection="column" flexShrink={0}>
-          <Text wrap="truncate-end"><Text bold color="#e3b341">⚠ to Claude?</Text><Text dimColor>{editing ? "  Enter send · Esc cancel" : reviewing === s.proposal ? "  all of it is shown · ^S send · ^E edit · Esc drop" : proposalLines.length > 3 ? "  ^S read all · ^E edit · Esc drop" : "  ^S send · ^E edit · Esc drop"}</Text></Text>
+          <Text wrap="truncate-end"><Text bold color="#e3b341">⚠ to Claude?</Text><Text dimColor>{editing ? "  Enter send · Esc cancel" : reviewing === s.proposal ? (reviewFits ? "  all of it is shown · ^S send · ^E edit · Esc drop" : "  pane too short to show it all · ^E read/edit · Esc drop") : proposalLines.length > 3 ? "  ^S read all · ^E edit · Esc drop" : "  ^S send · ^E edit · Esc drop"}</Text></Text>
           {proposalShown.map((l, i) => <Text key={i}>{l || " "}</Text>)}
         </Box>
       ) : null}

@@ -38,8 +38,11 @@ export function cleanProposal(text: string): string {
     .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b./g, "")
     .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "")
     .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, "")
+    .replace(/\n\s*\n+/g, "\n") // no blank-line padding that pushes text out of view
     .trim();
-  return t.length > PROPOSAL_MAX ? `${t.slice(0, PROPOSAL_MAX - 1)}…` : t;
+  const lines = t.split("\n");
+  const capped = lines.length > 12 ? `${lines.slice(0, 12).join("\n")}…` : t;
+  return capped.length > PROPOSAL_MAX ? `${capped.slice(0, PROPOSAL_MAX - 1)}…` : capped;
 }
 
 export interface WatchArgs extends Partial<WatchLaunch> {

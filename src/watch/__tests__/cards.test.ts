@@ -65,11 +65,24 @@ describe("council", () => {
 });
 
 describe("more cards", () => {
-  it("jury: roster chips with dropped jurors", () => {
-    const t = plain(toolCard("jury", "verdict…\n- A: Grok (first-principles)\n- B: DeepSeek (math)\n- Kimi (edge cases) — DROPPED (provider error or quota)", 80));
-    expect(t).toContain("panel 2/3");
-    expect(t).toContain("A Grok ✓");
-    expect(t).toContain("Kimi ✗");
+  it("jury: verdict headline, panel rows with dropped jurors", () => {
+    const t = plain(toolCard("jury", "JURY PANEL (2/3 responded)\n- A: Grok (first-principles)\n- B: DeepSeek (math)\n- Kimi (edge cases) — DROPPED (provider error or quota)\n\nVERDICT\nShip it behind a flag.\n", 80));
+    expect(t).toContain("Ship it behind a flag.");
+    expect(t).toContain("PANEL  2/3 answered");
+    expect(t).toContain("✓ A  Grok");
+    expect(t).toContain("✗ —  Kimi · dropped");
+  });
+  it("debug_triage: likelihood bars, top check", () => {
+    const t = plain(toolCard("debug_triage", "HYPOTHESES RANKED\n1. Stale shell narrows the pane — 60%\n2. ESC split from the mouse report — 25%\n\nDISCRIMINATING EVIDENCE\nCheapest check:\n- run cmux tree and look for two tachi-watch surfaces\n", 70));
+    expect(t).toContain("HYPOTHESES  2");
+    expect(t).toMatch(/1 Stale shell narrows the pane .*█.*60%/);
+    expect(t).toMatch(/check first {2}run cmux tree/);
+  });
+  it("diff_review: badge plus file:line issues", () => {
+    const t = plain(toolCard("diff_review", "MERGEABLE\n- [major] src/watch/ui.tsx:1314 — proposal sent unseen\n- [minor] config.ts:75 — repo config runs a command\n", 80));
+    expect(t).toContain("MERGEABLE");
+    expect(t).toContain("ui.tsx:1314  proposal sent unseen");
+    expect(t).toContain("config.ts:75");
   });
   it("usage_stats: table column as bars", () => {
     const t = plain(toolCard("usage_stats", "| tool | calls |\n|---|---|\n| grok | 10 |\n| kimi | 5 |", 60));

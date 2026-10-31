@@ -89,6 +89,21 @@ function degraded(output: string): string[] {
   return m ? [yellow(`↳ ${m[1]} → ${m[3]}`) + dim(`  (${m[2].trim()})`)] : [];
 }
 
+/** diff/security review: the badge and counts, then the issues that name a file:line. */
+function reviewView(output: string, width: number): string[] {
+  const head = mergeBadge(output);
+  const issues: string[] = [];
+  for (const m of output.matchAll(/([\w./-]+\.(?:ts|tsx|js|py|go|rs|java|rb|md|json|yaml|yml)):(\d+)\b[^\n]{0,4}?[—:-]?\s*([^\n]{0,90})/g)) {
+    const sev = /critical|high/i.test(m[0]) ? "\x1b[38;2;255;123;114m●\x1b[39m" : /major|medium/i.test(m[0]) ? yellow("●") : dim("●");
+    const text = m[3].replace(/\*\*/g, "").replace(/^[\s—:–-]+/, "").trim();
+    const line = `${sev} ${cyan(`${m[1].split("/").pop()}:${m[2]}`)}  ${dim(text)}`;
+    if (!issues.some((x) => x.includes(`${m[1].split("/").pop()}:${m[2]}`))) issues.push(line);
+    if (issues.length >= 6) break;
+  }
+  if (!head.length && !issues.length) return [];
+  return [...head, ...(issues.length ? ["", ...issues.map((l) => (l.length > width + 40 ? l : l))] : [])];
+}
+
 function mergeBadge(output: string): string[] {
   const not = /NOT\s+MERGEABLE/i.test(output);
   const yes = !not && /\bMERGEABLE\b/i.test(output);
@@ -111,23 +126,41 @@ function checklist(output: string, width: number): string[] {
   return [`${bold(`${done} / ${total} done`)}  ${bar(done / total, Math.max(6, Math.min(30, width - 20)))}`];
 }
 
-function ranked(output: string): string[] {
-  const out: string[] = [];
-  for (const m of output.matchAll(/^\s*(\d+)[.)]\s+(.{3,80}?)\s*[(\[]?(\d{1,3})\s*%[)\]]?/gm)) {
-    const [_, n, what, pct] = m;
-    const color = Number(n) === 1 ? green : Number(pct) >= 20 ? yellow : dim;
-    out.push(`${chip(n, Number(n) === 1 ? "#7ee787" : "#c9d1d9", Number(n) === 1 ? "#12261a" : "#1f2937")} ${what.replace(/[\s·—-]+$/, "")} ${color(`${pct}%`)}`);
-    if (out.length >= 5) break;
+/** debug_triage: ranked hypotheses as likelihood bars, the top one's cheapest check under them. */
+function ranked(output: string, width = 60): string[] {
+  const rows: Array<{ n: number; what: string; pct: number }> = [];
+  for (const m of output.matchAll(/^\s*(\d+)[.)]\s+(.{3,90}?)\s*[(\[—-]*\s*(\d{1,3})\s*%[)\]]?/gm)) {
+    rows.push({ n: Number(m[1]), what: m[2].replace(/[\s·—:(-]+$/, "").replace(/\*\*/g, ""), pct: Number(m[3]) });
+    if (rows.length >= 5) break;
   }
+  if (!rows.length) return [];
+  const barW = Math.max(6, Math.min(20, Math.floor(width / 4)));
+  const textW = Math.max(10, width - barW - 10);
+  const out = [bold(`HYPOTHESES  ${rows.length}`)];
+  for (const r of rows) {
+    const top = r.n === rows[0].n;
+    const what = r.what.length > textW ? `${r.what.slice(0, textW - 1)}…` : r.what.padEnd(textW);
+    out.push(`${top ? yellow(bold(String(r.n))) : dim(String(r.n))} ${top ? what : dim(what)} ${top ? yellow(bar(r.pct / 100, barW)) : dim(bar(r.pct / 100, barW))} ${String(r.pct).padStart(3)}%`);
+  }
+  const check = /(?:cheapest|discriminating)[^\n]*?(?:check|evidence)[^\n]*?[:—-]\s*\n?\s*(?:[-*\d.)\s]*)([^\n]{6,160})/i.exec(output);
+  if (check) out.push("", `${dim("check first")}  ${cyan(check[1].replace(/\*\*/g, "").trim())}`);
   return out;
 }
 
-function juryRoster(output: string): string[] {
-  const live = [...output.matchAll(/^- ([A-Z]): (.+)$/gm)].map((m) => chip(`${m[1]} ${m[2].replace(/\s*\(.*\)$/, "")} ✓`, "#7ee787", "#12261a"));
-  const dropped = [...output.matchAll(/^- (.+?) — DROPPED/gm)].map((m) => chip(`${m[1].replace(/\s*\(.*\)$/, "")} ✗`, "#ff7b72", "#3a1418"));
+/** jury: the verdict's headline, the panel as rows (✓ answered · ✗ dropped), a confidence meter when stated. */
+function juryView(output: string, width: number): string[] {
+  const live = [...output.matchAll(/^- ([A-Z]): (.+)$/gm)].map((m) => [m[1], m[2].replace(/\s*\(.*\)$/, "")] as const);
+  const dropped = [...output.matchAll(/^- (.+?) — DROPPED/gm)].map((m) => m[1].replace(/\s*\(.*\)$/, ""));
   if (!live.length && !dropped.length) return [];
-  return [bold(`panel ${live.length}${dropped.length ? `/${live.length + dropped.length}` : ""}`) + "  " + [...live, ...dropped].join(" ")];
+  const out: string[] = [];
+  const verdict = /^VERDICT\s*\n+([^\n]+)/m.exec(output)?.[1]?.replace(/\*\*/g, "").trim();
+  if (verdict) out.push(bold(verdict.length > width ? `${verdict.slice(0, width - 1)}…` : verdict), "");
+  out.push(bold(`PANEL  ${live.length}/${live.length + dropped.length} answered`));
+  for (const [letter, name] of live) out.push(`${green("✓")} ${dim(letter)}  ${name}`);
+  for (const name of dropped) out.push(`${"\x1b[38;2;255;123;114m✗\x1b[39m"} ${dim("—")}  ${dim(`${name} · dropped (provider error or quota)`)}`);
+  return out;
 }
+
 
 /** A markdown table's first numeric column as horizontal bars (usage_stats). */
 function tableBars(output: string, width: number): string[] {
@@ -187,10 +220,10 @@ export function toolCard(tool: string, output: string, width: number): string[] 
 
 registerCard({ name: "jev", match: /^jev_decide$/, summary: (c) => jevBars(c.output, c.width) });
 registerCard({ name: "sources", match: /search|perplexity_ask|perplexity_reason/, summary: (c) => sourceChips(c.output, c.width) });
-registerCard({ name: "verdict", match: /^(diff_review|security_review|openai_code_review)$/, summary: (c) => mergeBadge(c.output) });
+registerCard({ name: "verdict", match: /^(diff_review|security_review|openai_code_review)$/, summary: (c) => reviewView(c.output, c.width) });
 registerCard({ name: "checklist", match: /planner|plan_critique/, summary: (c) => checklist(c.output, c.width) });
-registerCard({ name: "triage", match: /^debug_triage$/, summary: (c) => ranked(c.output) });
-registerCard({ name: "jury", match: /^jury$/, summary: (c) => juryRoster(c.output) });
+registerCard({ name: "triage", match: /^debug_triage$/, summary: (c) => ranked(c.output, c.width) });
+registerCard({ name: "jury", match: /^jury$/, summary: (c) => juryView(c.output, c.width) });
 registerCard({ name: "usage", match: /^usage_stats$/, summary: (c) => tableBars(c.output, c.width) });
 
 // --- council --------------------------------------------------------------------
