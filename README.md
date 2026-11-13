@@ -339,6 +339,10 @@ A terminal pane that follows one Claude Code session: every tachibot call in ful
 model's notes on them checked against your project memory, a chat with that model, tachibot's
 prompt-technique catalog, and a one-key way to send Claude a message you approved.
 
+![The tachi-watch pane: tachibot calls, a jury verdict with the second brain's notes citing CLAUDE.md, and a chat column](docs/assets/tachi-watch.png)
+
+The real pane, showing a staged session (`node scripts/watch-demo.mjs <dir>` writes it).
+
 ```bash
 # from inside Claude Code — opens the pane in a split beside it
 ! tachi-agent watch --open
@@ -365,6 +369,11 @@ terminal that can be scripted; sending does not, once the hook below is installe
 
 The pane draws in 24-bit colour where the terminal has it and in the 256-colour palette elsewhere.
 
+The model calls nested under each tachibot call come from tachibot's trace
+(`TACHIBOT_TRACE_UI=1`). The pane follows only the tachibot its own Claude session started, so
+it needs Claude's pid: `watch --open` passes it, and so does the command it prints. A pane
+started without it still lists every call from the transcript, without the nested model calls.
+
 ### Sending to Claude from any terminal
 
 ```bash
@@ -376,8 +385,10 @@ tachi-agent watch --uninstall-hooks
 Restart Claude Code afterwards. The hook hands Claude what you sent from the pane at its next
 step: after a tool call, when it finishes a turn (it then carries on with your message), or
 with your next prompt. Nothing is typed into Claude's prompt, so a message can never answer
-one of its dialogs. A message that waits an hour is dropped, and the pane says so. Without
-the hook, and outside cmux and Herdr, the pane shows the text for you to copy.
+one of its dialogs. A message that waits an hour is dropped, and the pane says so. If a hook
+is killed between printing a message and recording it, a later hook delivers it again: Claude
+may see a message twice in that case, but never misses one. Without the hook, and outside
+cmux and Herdr, the pane shows the text for you to copy.
 
 ## Interactive chat (v0.4.0)
 
