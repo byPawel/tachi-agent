@@ -228,16 +228,27 @@ export function withHooks(settings: Settings, command: string | undefined): Sett
 /** Write (or remove) the hook in a Claude Code settings file; other settings are kept as they are. */
 export function installHooks(settingsPath: string, command: string | undefined): void {
   let settings: Settings = {};
+  let target = settingsPath;
+  let mode = 0o600; // a new settings file is the user's alone
   if (fs.existsSync(settingsPath)) {
+    // a settings file kept in a dotfiles repo is a symlink: write through it, never replace the link
+    target = fs.realpathSync(settingsPath);
+    mode = fs.statSync(target).mode & 0o777; // and keep the permissions it had
     // a settings file we cannot parse is the user's to fix: never overwrite it
-    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as Settings;
+    settings = JSON.parse(fs.readFileSync(target, "utf8")) as Settings;
     if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error(`${settingsPath} is not a JSON object`);
   }
-  fs.mkdirSync(dirname(settingsPath), { recursive: true });
+  fs.mkdirSync(dirname(target), { recursive: true });
   // whole file beside it, then the rename: an interrupted write never leaves half a settings file
-  const tmp = `${settingsPath}.tachi-watch.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(withHooks(settings, command), null, 2)}\n`);
-  fs.renameSync(tmp, settingsPath);
+  const tmp = `${target}.tachi-watch.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(withHooks(settings, command), null, 2)}\n`, { mode });
+    fs.chmodSync(tmp, mode); // the mode above is masked by umask
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 // --- run as the hook ------------------------------------------------------------

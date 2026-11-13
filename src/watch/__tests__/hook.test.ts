@@ -154,6 +154,24 @@ describe("installing the hook", () => {
     expect(withHooks(withHooks(theirs, cmd), undefined)).toEqual(theirs);
   });
 
+  it("keeps the settings file's permissions and writes through a symlink instead of replacing it", () => {
+    const real = path.join(home, "dotfiles", "settings.json");
+    fs.mkdirSync(path.dirname(real), { recursive: true });
+    fs.writeFileSync(real, JSON.stringify({ model: "x" }), { mode: 0o640 });
+    fs.chmodSync(real, 0o640);
+    const link = path.join(home, "settings.json");
+    fs.symlinkSync(real, link);
+    installHooks(link, cmd);
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.statSync(real).mode & 0o777).toBe(0o640);
+    expect(JSON.parse(fs.readFileSync(real, "utf8"))).toMatchObject({ model: "x", hooks: { Stop: expect.any(Array) } });
+    expect(fs.readdirSync(path.dirname(real))).toEqual(["settings.json"]);
+    // a settings file we create holds hook commands: readable by its owner only
+    const fresh = path.join(home, "new", "settings.json");
+    installHooks(fresh, cmd);
+    expect(fs.statSync(fresh).mode & 0o777).toBe(0o600);
+  });
+
   it("writes the project's settings.local.json, or the user's with --global; never a file it cannot parse", () => {
     const cwd = path.join(home, "proj");
     setupHooks({ ...parseWatchArgs(["--install-hooks", "--cwd", cwd], {}) }, home);
