@@ -15,7 +15,7 @@ import { claudeTranscriptPath, type WatchEvent } from "./events.js";
 import { tailClaudeTranscript, followTachibot } from "./sources.js";
 import { CALL_REVIEW_SYSTEM_PROMPT, WATCHER_SYSTEM_PROMPT, buildCallReviewPrompt, buildReviewPrompt, formatLog, parseReview, shouldReview, type ReviewReason } from "./policy.js";
 import { loadSaved, saveCards, loadLabels, saveLabels } from "./persist.js";
-import { clearQueue, enqueue, hookLive, hookScriptPath, installHooks, openInbox, readReceipt } from "./hook.js";
+import { clearQueue, enqueue, hookCommand, hookLive, installHooks, openInbox, readReceipt } from "./hook.js";
 import { join } from "node:path";
 import { splitFollowUps } from "./components.js";
 import { loadTechniques, techniqueMessage, type Technique } from "./prompts.js";
@@ -83,7 +83,7 @@ export function parseWatchArgs(argv: string[], env: Record<string, string | unde
  */
 export function setupHooks(args: WatchArgs, home: string = homedir()): void {
   const settings = args.global ? join(home, ".claude", "settings.json") : join(args.cwd ?? process.cwd(), ".claude", "settings.local.json");
-  const command = args.hooks === "install" ? [process.execPath, hookScriptPath()].map(shellQuote).join(" ") : undefined;
+  const command = args.hooks === "install" ? hookCommand(process.execPath, shellQuote) : undefined;
   try {
     installHooks(settings, command);
   } catch (err) {
@@ -103,7 +103,7 @@ export async function openWatchSplit(args: WatchArgs, env: Record<string, string
     console.error("✖ no Claude session id — run this from inside Claude Code (`! tachi-agent watch --open`) or pass --session <id>.");
     process.exit(1);
   }
-  const claudePid = Number(env.CLAUDE_PID);
+  const claudePid = args.claudePid ?? Number(env.CLAUDE_PID);
   const launch: WatchLaunch = {
     session: args.session,
     cwd: args.cwd ?? process.cwd(),

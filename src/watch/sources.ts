@@ -103,8 +103,16 @@ function alive(pid: number): boolean {
 }
 
 /**
- * Live tachibot trace server: the one spawned by `claudePid` when known (exact),
- * else the newest, preferring one started in `cwd`.
+ * The live tachibot trace server that belongs to this Claude session, or none.
+ *
+ * Only the tachibot that this Claude spawned (its parent pid is `claudePid`) qualifies.
+ * Without `claudePid` there is no way to prove whose a trace is — a tachibot in the same
+ * project may be another session's — so none is followed. `watch --open` always passes it,
+ * and so does the command it prints for a pane you split yourself.
+ *
+ * Never "the newest one on the machine": a tachibot only registers at its first traced
+ * call, so until this session makes one, the newest is some other session's — and the
+ * pane would list, and the second brain would review, that session's calls.
  */
 export function findTachibot(cwd: string, dir: string = tachibotTraceDir(), claudePid?: number): TraceRegistryEntry | undefined {
   let files: string[];
@@ -122,12 +130,9 @@ export function findTachibot(cwd: string, dir: string = tachibotTraceDir(), clau
       // ignore
     }
   }
-  if (claudePid) {
-    const own = live.filter((e) => e.ppid === claudePid).sort((a, b) => b.startedAt - a.startedAt)[0];
-    if (own) return own;
-  }
-  live.sort((a, b) => Number(b.cwd === cwd) - Number(a.cwd === cwd) || b.startedAt - a.startedAt);
-  return live[0];
+  if (!claudePid) return undefined;
+  // newest first: a registry file left by a dead tachibot whose pid was reused never outranks the real one
+  return live.filter((e) => e.ppid === claudePid).sort((x, y) => y.startedAt - x.startedAt)[0];
 }
 
 function streamOnce(entry: TraceRegistryEntry, onEvent: (e: WatchEvent) => void, signal: AbortSignal): Promise<void> {
@@ -161,6 +166,9 @@ function streamOnce(entry: TraceRegistryEntry, onEvent: (e: WatchEvent) => void,
         res.on("error", () => resolve());
       },
     );
+    // a port that accepts but never answers (a stale entry whose port something else took) must not hold the loop
+    req.setTimeout(5000, () => req.destroy());
+    req.on("response", () => req.setTimeout(0));
     req.on("error", () => resolve());
   });
 }
@@ -176,33 +184,49 @@ export async function followTachibot(
   signal: AbortSignal,
   claudePid?: number,
 ): Promise<void> {
-  let last: number | undefined;
-  let lastSeenTs = 0;
+  let last: string | undefined;
+  // what each server has already shown us, by event identity: a reconnect replays its buffer,
+  // and two different events can carry the same timestamp
+  const shown = new Map<string, Set<string>>();
   let announcedMissing = false;
   while (!signal.aborted) {
     const entry = findTachibot(cwd, tachibotTraceDir(), claudePid);
     if (!entry) {
       if (!announcedMissing) {
-        onStatus("tachibot: not traced yet (needs TACHIBOT_TRACE_UI=1 and one tachibot call)");
+        onStatus(claudePid
+          ? "tachibot: not traced yet (needs TACHIBOT_TRACE_UI=1 and one tachibot call)"
+          : "tachibot: model trace needs Claude's pid — open the pane with `watch --open`");
         announcedMissing = true;
       }
       await sleep(2000);
       continue;
     }
     announcedMissing = false;
-    // First connect to a server shows its replayed buffer (useful context);
-    // a reconnect to the SAME server would duplicate it, so skip older events.
-    const reconnect = entry.pid === last;
-    const since = reconnect ? lastSeenTs : 0;
-    if (!reconnect) {
+    // The first connect to a server shows its replayed buffer (useful context); a reconnect skips what was shown.
+    const server = `${entry.pid}:${entry.port}:${entry.startedAt}`;
+    if (server !== last) {
       onStatus(`tachibot: connected (pid ${entry.pid})`);
-      last = entry.pid;
+      last = server;
     }
+    let seen = shown.get(server);
+    if (!seen) shown.set(server, (seen = new Set()));
+    // While streaming, keep asking whose trace this should be: when the answer changes
+    // (this session's own tachibot registered, or a second session made the choice ambiguous) drop the stream.
+    const stream = new AbortController();
+    const stop = () => stream.abort();
+    signal.addEventListener("abort", stop);
+    const recheck = setInterval(() => {
+      if (findTachibot(cwd, tachibotTraceDir(), claudePid)?.pid !== entry.pid) stream.abort();
+    }, 3000);
     await streamOnce(entry, (e) => {
-      if (e.ts <= since) return;
-      lastSeenTs = Math.max(lastSeenTs, e.ts);
+      const key = `${e.id ?? ""}|${e.kind}|${e.ts}|${e.text.length}`;
+      if (seen.has(key)) return;
+      if (seen.size > 50_000) seen.clear(); // a very long session: a rare repeat beats unbounded memory
+      seen.add(key);
       onEvent(e);
-    }, signal);
+    }, stream.signal);
+    clearInterval(recheck);
+    signal.removeEventListener("abort", stop);
     await sleep(1000);
   }
 }

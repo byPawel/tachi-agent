@@ -79,17 +79,27 @@ describe("tachibot trace", () => {
     expect(tachibotTraceDir({ TACHI_WATCH_TRACE_DIR: "/o" }, "darwin", "/h")).toBe("/o");
   });
 
-  it("prefers a live tachibot in the same project, skips dead ones", () => {
+  it("follows only the tachibot this Claude spawned, and none when it cannot tell", () => {
     const dir = mkdtempSync(join(tmpdir(), "watch-reg-"));
-    const w = (name: string, pid: number, cwd: string, startedAt: number) =>
-      writeFileSync(join(dir, `${name}.json`), JSON.stringify({ pid, port: 1, token: "t", cwd, startedAt }));
-    w("a", process.pid, "/other", 9);
-    w("b", process.pid, "/proj", 1);
-    w("c", 999_999, "/proj", 99);
-    expect(findTachibot("/proj", dir)?.cwd).toBe("/proj");
-    expect(findTachibot("/nowhere", dir)?.cwd).toBe("/other");
-    writeFileSync(join(dir, "d.json"), JSON.stringify({ pid: process.pid, ppid: 4242, port: 2, token: "t", cwd: "/elsewhere", startedAt: 0 }));
-    expect(findTachibot("/proj", dir, 4242)?.port).toBe(2); // exact Claude match beats cwd + recency
+    const w = (name: string, e: { pid: number; ppid?: number; port: number; cwd: string; startedAt: number }) =>
+      writeFileSync(join(dir, `${name}.json`), JSON.stringify({ token: "t", ...e }));
+    w("other-project", { pid: process.pid, ppid: 4242, port: 1, cwd: "/other", startedAt: 9 });
+    w("same-project-other-session", { pid: process.pid, ppid: 5151, port: 2, cwd: "/proj", startedAt: 8 });
+    w("no-parent-recorded", { pid: process.pid, port: 3, cwd: "/proj", startedAt: 7 });
+    w("dead", { pid: 999_999, ppid: 7777, port: 4, cwd: "/proj", startedAt: 99 });
+    // this Claude (7777) has not made a traced call yet, so its tachibot is not registered: wait for it.
+    // Not a neighbour's, not one in the same project, not one that recorded no parent, not a dead one.
+    expect(findTachibot("/proj", dir, 7777)).toBeUndefined();
+    w("mine", { pid: process.pid, ppid: 7777, port: 5, cwd: "/proj", startedAt: 10 });
+    expect(findTachibot("/proj", dir, 7777)?.port).toBe(5);
+    expect(findTachibot("/anywhere", dir, 4242)?.port).toBe(1); // by parent, wherever it started
+    // a newer entry for the same Claude wins over an older one (a dead tachibot's file whose pid was reused)
+    w("mine-restarted", { pid: process.pid, ppid: 7777, port: 6, cwd: "/proj", startedAt: 20 });
+    expect(findTachibot("/proj", dir, 7777)?.port).toBe(6);
+    // a pane started without Claude's pid cannot prove whose trace it would be: it follows none,
+    // even when only one session has registered in the project
+    expect(findTachibot("/proj", dir)).toBeUndefined();
+    expect(findTachibot("/other", dir)).toBeUndefined();
     rmSync(dir, { recursive: true, force: true });
   });
 });
