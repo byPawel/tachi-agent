@@ -46,9 +46,10 @@ async function main() {
   // watch — side agent in a split next to Claude Code (src/watch/)
   // ---------------------------------------------------------------------------
   if (argv[0] === "watch") {
-    const { parseWatchArgs, openWatchSplit, runWatch } = await import("./watch/watch.js");
+    const { parseWatchArgs, openWatchSplit, runWatch, setupHooks } = await import("./watch/watch.js");
     const args = parseWatchArgs(argv.slice(1));
-    if (args.open) await openWatchSplit(args);
+    if (args.hooks) setupHooks(args);
+    else if (args.open) await openWatchSplit(args);
     else await runWatch(args);
     return;
   }

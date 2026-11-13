@@ -21,6 +21,7 @@ import { CardHeader, FollowUps, Shimmer, Spinner, TabBar, Tag, tabSpans, THEME, 
 import { confidenceMeter, councilPanel, councilPhases, parsePlanner, renderersFor, setPlannerSteps, setThoughtChain, toolCard, type PlannerStepInfo } from "./cards.js";
 import { rankTechniques, type Technique } from "./prompts.js";
 import { linkifyAnsi, renderMarkdown, stripControls } from "./md.js";
+import { supportsTruecolor, to256 } from "./terminal.js";
 import type { Card } from "./store.js";
 import type { WatchController, WatchState } from "./watch.js";
 
@@ -817,50 +818,63 @@ export const START_SUGGESTIONS = [
 
 /** Before the first tachibot call: what is connected, what was resumed, what to try. */
 function StartPage({ s, width, calls, height = 99 }: { s: WatchState; width: number; calls: Item[]; height?: number }) {
-  // short terminal: sections drop from the bottom (legend, then TRY, then the session box)
-  const fits = (rowsNeeded: number) => height >= rowsNeeded;
   const last = calls[calls.length - 1]?.call;
   const running = calls.filter((i) => i.call?.status === "running").length;
   const resumed = s.cards.filter((c) => c.type === "note").length;
   const answers = s.cards.filter((c) => c.type === "answer" && c.input).length;
   const traced = s.tachibot.startsWith("connected");
   const check = (ok: boolean | "warn", label: string, detail: string) => (
-    <Box justifyContent="space-between" height={1} overflow="hidden">
+    <Box key={label} justifyContent="space-between" height={1} overflow="hidden">
       <Text><Text color={ok === "warn" ? "#e3b341" : ok ? "#7ee787" : "#ff7b72"}>{ok === "warn" ? "!" : ok ? "✓" : "✗"}</Text> {label}</Text>
       <Text dimColor wrap="truncate-end">{detail}</Text>
     </Box>
   );
-  const box = { borderStyle: "round" as const, borderColor: "#8b949e", paddingX: 1, flexDirection: "column" as const };
+  const box = { borderStyle: "round" as const, borderColor: "#8b949e", paddingX: 1, flexDirection: "column" as const, flexShrink: 0 };
+  // A short pane shows fewer sections, never squeezed ones: each is taken only if all its rows
+  // (gap included) still fit. The ready check always shows; then the session, TRY, MEMORY, the legend.
+  const TAGLINE = "second brain beside Claude — every tachibot call in full, checked against your memory";
+  // (Rows are counted, not clipped: Ink does not clip a row that has its own overflow box.)
+  const titleRows = 1 + Math.ceil(TAGLINE.length / Math.max(20, Math.min(width, 90))) + 1; // name, tagline, gap
+  const showTitle = 1 + titleRows + 8 <= height;
+  const checks = [
+    check(true, "Claude session", s.session.slice(0, 8)),
+    check(traced ? true : "warn", "tachibot trace", traced ? "connected · models live" : s.tachibot),
+    check(true, "memory", s.memory),
+    check(s.target || s.hooks ? true : "warn", "send to Claude", s.target ? `pane ${s.target.slice(0, 12)}` : s.hooks ? "Claude Code hooks" : "copy/paste · watch --install-hooks"),
+    check(true, "brain", s.brain),
+  ].slice(0, Math.max(0, height - 1 - (showTitle ? titleRows : 0) - 3));
+  let used = 1 + (showTitle ? titleRows : 0) + 3 + checks.length;
+  const take = (rows: number) => used + rows <= height && ((used += rows), true);
+  const showSession = (calls.length > 0 || resumed > 0 || answers > 0) && take(calls.length ? (last ? 7 : 6) : 5);
+  const showTry = take(7);
+  const showMemory = take(8);
+  const showLegend = take(5);
   return (
-    <Box flexDirection="column" gap={1} paddingTop={1} width={Math.min(width, 90)}>
-      <Box flexDirection="column">
+    <Box flexDirection="column" gap={1} paddingTop={1} width={Math.min(width, 90)} height={height} overflow="hidden">
+      {showTitle ? <Box flexDirection="column" flexShrink={0}>
         <Text bold color={THEME.calls}>t a c h i · w a t c h</Text>
-        <Text dimColor wrap="wrap">second brain beside Claude — every tachibot call in full, checked against your memory</Text>
-      </Box>
-      <Box {...box}>
+        <Text dimColor wrap="wrap">{TAGLINE}</Text>
+      </Box> : null}
+      {checks.length ? <Box {...box}>
         <Text bold color={THEME.chat}>READY CHECK</Text>
-        {check(true, "Claude session", s.session.slice(0, 8))}
-        {check(traced ? true : "warn", "tachibot trace", traced ? "connected · models live" : s.tachibot)}
-        {check(true, "memory", s.memory)}
-        {check(!!s.target, "send to Claude", s.target ? `pane ${s.target.slice(0, 12)}` : "no target — copy/paste")}
-        {check(true, "brain", s.brain)}
-      </Box>
-      {calls.length && fits(18) ? (
+        {checks}
+      </Box> : null}
+      {showSession && calls.length ? (
         <Box {...box}>
           <Text bold color={THEME.chat}>THIS SESSION</Text>
-          <Text><Text color="#7ee787">{calls.length}</Text> tachibot calls{running ? <Text color="#e3b341"> · {running} running</Text> : null} · <Text color="#e3b341">●</Text> {resumed} notes · <Text color="#79c0ff">◇</Text> {answers} answers</Text>
+          <Text wrap="truncate-end"><Text color="#7ee787">{calls.length}</Text> tachibot calls{running ? <Text color="#e3b341"> · {running} running</Text> : null} · <Text color="#e3b341">●</Text> {resumed} notes · <Text color="#79c0ff">◇</Text> {answers} answers</Text>
           {last ? <Text dimColor wrap="truncate-end">latest: {last.title.replace(/^tachibot · /, "")} — {last.input}</Text> : null}
-          <Text dimColor>↑↓ or Tab → open the calls</Text>
+          <Text dimColor wrap="truncate-end">↑↓ or Tab → open the calls</Text>
         </Box>
-      ) : (resumed || answers) && fits(18) ? (
+      ) : showSession ? (
         <Box {...box}>
           <Text bold color={THEME.chat}>RESUMED FROM LAST RUN</Text>
           <Text><Text color="#e3b341">●</Text> {resumed} brain notes · <Text color="#79c0ff">◇</Text> {answers} answers</Text>
         </Box>
       ) : null}
-      {fits(30) ? (
+      {showMemory ? (
         <Box {...box}>
-          <Text bold color={THEME.chat}>MEMORY <Text color={THEME.muted} bold={false}>· what the second brain checks calls against</Text></Text>
+          <Text bold color={THEME.chat} wrap="truncate-end">MEMORY <Text color={THEME.muted} bold={false}>· what the second brain checks calls against</Text></Text>
           {([
             ["project", s.memoryList.filter((f) => !f.startsWith("~") && !f.startsWith("dokoro/"))],
             ["Claude memory", s.memoryList.filter((f) => f.startsWith("~"))],
@@ -875,15 +889,15 @@ function StartPage({ s, width, calls, height = 99 }: { s: WatchState; width: num
           <Text wrap="truncate-end"><Text color={s.dokoroSearch ? THEME.ok : THEME.muted}>{s.dokoroSearch ? "✓" : "·"}</Text>{` ${"dokoro search".padEnd(14)}`}<Text color={THEME.muted}>{s.dokoroSearch ? "connected — recall on every review" : "not connected (set memory.dokoroCmd)"}</Text></Text>
         </Box>
       ) : null}
-      {fits(26) ? <Box {...box}>
+      {showTry ? <Box {...box}>
         <Text bold color={THEME.chat}>TRY</Text>
         {START_SUGGESTIONS.map((q, i) => (
           <Text key={i} wrap="truncate-end"><Text bold color={THEME.chat}>{i + 1} › </Text>{q}</Text>
         ))}
       </Box> : null}
-      {fits(32) ? <Box borderStyle="round" borderColor="#8b949e" borderDimColor paddingX={1} flexDirection="column">
-        <Text dimColor><Text bold color="#f0f6fc">Tab</Text> calls ⇄ chat  <Text bold color="#f0f6fc">^G</Text> home  <Text bold color="#f0f6fc">^S</Text> send  <Text bold color="#f0f6fc">^B</Text> details  <Text bold color="#f0f6fc">@claude</Text> text → Claude</Text>
-        <Text dimColor><Text color="#7ee787">✓</Text> ok  <Text color="#ff7b72">✗</Text> error  <Text color="#e3b341">↳</Text> fell back  <Text color="#e3b341">●</Text> brain notes  <Text color="#56d364">◆</Text> model calls</Text>
+      {showLegend ? <Box borderStyle="round" borderColor="#8b949e" borderDimColor paddingX={1} flexDirection="column" flexShrink={0}>
+        <Text dimColor wrap="truncate-end"><Text bold color="#f0f6fc">Tab</Text> calls ⇄ chat  <Text bold color="#f0f6fc">^G</Text> home  <Text bold color="#f0f6fc">^S</Text> send  <Text bold color="#f0f6fc">^B</Text> details  <Text bold color="#f0f6fc">@claude</Text> text → Claude</Text>
+        <Text dimColor wrap="truncate-end"><Text color="#7ee787">✓</Text> ok  <Text color="#ff7b72">✗</Text> error  <Text color="#e3b341">↳</Text> fell back  <Text color="#e3b341">●</Text> brain notes  <Text color="#56d364">◆</Text> model calls</Text>
       </Box> : null}
     </Box>
   );
@@ -2071,7 +2085,7 @@ function App({ controller }: { controller: WatchController }) {
       </Box>
     );
   } else if (view === "home" || (!items.length && view === "calls")) {
-    body = <StartPage s={s} width={width} calls={calls} height={bodyRows} />;
+    body = <StartPage s={s} width={width} calls={calls} height={bodyRows - 1} />; // the frame stops one row short of the terminal
   } else if (wide && (view !== "chat" || threeCol)) {
     // split: calls · open card (· chat at ≥140 cols), side by side
     const listRows = bodyRows - 2;
@@ -2300,9 +2314,11 @@ export async function renderWatchUi(controller: WatchController, options: Parame
   // keep a plain copy of each frame so a mouse drag can select text from it
   const target = (typeof options === "object" && "stdout" in options && options.stdout) || process.stdout;
   const write = target.write.bind(target) as (c: unknown, ...rest: unknown[]) => boolean;
+  // a terminal without 24-bit colour gets the same frame in the 256-colour palette
+  const paint = target !== process.stdout || supportsTruecolor(process.env) ? (c: string) => c : to256;
   (target as { write: unknown }).write = (c: unknown, ...rest: unknown[]) => {
     if (typeof c === "string") captureFrame(target, c);
-    return write(c, ...rest);
+    return write(typeof c === "string" ? paint(c) : c, ...rest);
   };
   const off = () => mouse && process.stdout.write(MOUSE_OFF);
   process.once("exit", off);

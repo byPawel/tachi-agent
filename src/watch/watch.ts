@@ -15,9 +15,11 @@ import { claudeTranscriptPath, type WatchEvent } from "./events.js";
 import { tailClaudeTranscript, followTachibot } from "./sources.js";
 import { CALL_REVIEW_SYSTEM_PROMPT, WATCHER_SYSTEM_PROMPT, buildCallReviewPrompt, buildReviewPrompt, formatLog, parseReview, shouldReview, type ReviewReason } from "./policy.js";
 import { loadSaved, saveCards, loadLabels, saveLabels } from "./persist.js";
+import { clearQueue, enqueue, hookLive, hookScriptPath, installHooks, openInbox, readReceipt } from "./hook.js";
+import { join } from "node:path";
 import { splitFollowUps } from "./components.js";
 import { loadTechniques, techniqueMessage, type Technique } from "./prompts.js";
-import { cleanText, buildInboxCommand, buildOpenCommand, buildSendCommand, defaultTarget, parseInbox, herdrPaneId, watchArgv, type WatchLaunch } from "./terminal.js";
+import { cleanText, buildInboxCommand, buildOpenCommand, buildSendCommand, defaultTarget, parseInbox, herdrPaneId, type Receipt, herdrAppPane, shellQuote, watchArgv, type WatchLaunch } from "./terminal.js";
 import { DEFAULT_CONFIG, isLayout, loadWatchConfig, type WatchConfig, type WatchLayout } from "./config.js";
 import { makeBrain, type Brain } from "./brain.js";
 import { memoryFiles, readMemoryDocs, selectSnippets } from "./memory.js";
@@ -48,6 +50,10 @@ export function cleanProposal(text: string): string {
 export interface WatchArgs extends Partial<WatchLaunch> {
   open: boolean;
   brain?: string;
+  /** `--install-hooks` / `--uninstall-hooks`: message delivery through Claude Code's hooks */
+  hooks?: "install" | "uninstall";
+  /** with the above: every project (~/.claude/settings.json) instead of this one */
+  global?: boolean;
 }
 
 export function parseWatchArgs(argv: string[], env: Record<string, string | undefined> = process.env): WatchArgs {
@@ -63,9 +69,32 @@ export function parseWatchArgs(argv: string[], env: Record<string, string | unde
   };
   const brain = get("--brain");
   if (brain) args.brain = brain;
+  if (argv.includes("--install-hooks")) args.hooks = "install";
+  if (argv.includes("--uninstall-hooks")) args.hooks = "uninstall";
+  if (argv.includes("--global")) args.global = true;
   const claudePid = Number(get("--claude-pid"));
   if (Number.isInteger(claudePid) && claudePid > 0) args.claudePid = claudePid;
   return args;
+}
+
+/**
+ * `watch --install-hooks`: register the delivery hook with Claude Code — for this project
+ * (.claude/settings.local.json, yours alone) or with --global for every project.
+ */
+export function setupHooks(args: WatchArgs, home: string = homedir()): void {
+  const settings = args.global ? join(home, ".claude", "settings.json") : join(args.cwd ?? process.cwd(), ".claude", "settings.local.json");
+  const command = args.hooks === "install" ? [process.execPath, hookScriptPath()].map(shellQuote).join(" ") : undefined;
+  try {
+    installHooks(settings, command);
+  } catch (err) {
+    console.error(`✖ ${settings} was left untouched: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (!command) return console.log(`tachi-watch hook removed from ${settings}`);
+  console.log(`tachi-watch hook added to ${settings}`);
+  console.log("Restart Claude Code to load it. After that, messages you send from the watch pane reach Claude in any terminal:");
+  console.log("after its next tool call, when it finishes a turn, or with your next prompt.");
 }
 
 /** Open the watcher in a split next to the calling (Claude) pane. */
@@ -83,33 +112,44 @@ export async function openWatchSplit(args: WatchArgs, env: Record<string, string
   };
   const argv = watchArgv(process.execPath, process.argv[1], launch);
   if (args.brain) argv.push("--brain", args.brain);
-  const plan = buildOpenCommand(argv, env);
-  if (plan.kind === "herdr") {
-    // two steps: split (returns the new pane id as JSON), then run the watcher in it
-    execFile(plan.split.cmd, plan.split.args, (err, stdout) => {
-      const pane = err ? undefined : herdrPaneId(String(stdout));
-      if (!pane) {
-        console.error(`✖ could not open herdr split: ${err?.message ?? "no pane id in response"}`);
-        return;
-      }
-      const run = plan.run(pane);
-      execFile(run.cmd, run.args, (runErr) => {
-        if (runErr) console.error(`✖ herdr pane run failed: ${runErr.message}`);
-        else console.log(`tachi-watch opened in a herdr split → watching session ${launch.session.slice(0, 8)}`);
-      });
-    });
-    return;
-  }
+  const plan = buildOpenCommand(argv, env, { platform: process.platform, tty: await ttyOf(launch.claudePid ?? process.ppid) });
+  const run = (c: { cmd: string; args: string[] }) =>
+    new Promise<string>((resolve, reject) => execFile(c.cmd, c.args, { timeout: 15_000 }, (err, stdout, stderr) => (err ? reject(new Error(String(stderr).trim().split("\n").pop() || err.message)) : resolve(String(stdout)))));
+  const byHand = (hint?: string) => {
+    console.log("Split the terminal yourself (e.g. Cmd+D) and run:\n");
+    console.log(`  ${argv.map(shellQuote).join(" ")}\n`);
+    if (hint) console.log(`${hint}\n`);
+  };
   if (plan.kind === "manual") {
-    console.log("This terminal can't be split from a script. Split it yourself (e.g. Cmd+D) and run:\n");
-    console.log(`  ${plan.shell}\n`);
-    return;
+    console.log("This terminal can't be split from a script.");
+    return byHand(plan.hint);
   }
-  await new Promise<void>((resolve) => {
-    execFile(plan.command.cmd, plan.command.args, (err) => {
-      if (err) console.error(`✖ could not open ${plan.kind} split: ${err.message}`);
-      else console.log(`tachi-watch opened in a ${plan.kind} split → watching session ${launch.session.slice(0, 8)}`);
-      resolve();
+  const name = plan.kind === "herdr-app" ? "Herdr" : plan.kind;
+  try {
+    if (plan.kind === "herdr") {
+      // two steps: split (returns the new pane id as JSON), then run the watcher in it
+      const pane = herdrPaneId(await run(plan.split));
+      if (!pane) throw new Error("no pane id in herdr's response");
+      await run(plan.run(pane));
+    } else if (plan.kind === "herdr-app") {
+      // two steps: find the pane showing Claude's terminal, then split that pane
+      const pane = herdrAppPane(await run(plan.list), plan.terminal);
+      if (!pane) throw new Error(`terminal ${plan.terminal} has no pane in the Herdr window`);
+      await run(plan.split(pane));
+    } else await run(plan.command);
+    console.log(`tachi-watch opened in a ${name} split → watching session ${launch.session.slice(0, 8)}`);
+  } catch (err) {
+    console.error(`✖ could not open the ${name} split: ${err instanceof Error ? err.message : String(err)}`);
+    byHand();
+  }
+}
+
+/** The tty a process runs on, as a device path — how a terminal app's panes are told apart. */
+function ttyOf(pid: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile("ps", ["-o", "tty=", "-p", String(pid)], { timeout: 3000 }, (err, stdout) => {
+      const t = err ? "" : String(stdout).trim();
+      resolve(/^[A-Za-z0-9/]+$/.test(t) && !t.startsWith("?") ? (t.startsWith("/") ? t : `/dev/${t}`) : undefined);
     });
   });
 }
@@ -123,6 +163,8 @@ export interface WatchState {
   cwd: string;
   brain: string;
   tachibot: string;
+  /** Claude Code runs our delivery hook for this session: messages reach Claude in any terminal */
+  hooks?: boolean;
   memory: string;
   target?: string;
   reviewing: boolean;
@@ -212,7 +254,8 @@ export class WatchController {
     }
     if (brainError) this.say("status", `${brainError} — using ${DEFAULT_CONFIG.brain}`);
     if (saved.length) this.say("status", `resumed ${saved.length} notes/answers from earlier`);
-    if (!args.target) this.say("status", "no Claude pane target — approved messages will be shown for copy-paste");
+    this.state.hooks = hookLive(args.session);
+    if (!args.target && !this.state.hooks) this.say("status", "no channel to Claude here — messages are shown to copy (once: tachi-agent watch --install-hooks)");
   }
 
   // --- store plumbing (useSyncExternalStore contract) -----------------------
@@ -265,6 +308,8 @@ export class WatchController {
     }, 1000);
     // Commentary on the session itself: what Claude is doing vs what you asked + memory.
     const sessionTimer = setInterval(() => {
+      // the hook reports in at Claude's first step after the pane opens
+      if (!this.state.hooks && hookLive(this.args.session)) this.set({ hooks: true });
       if (this.state.reviewing) return;
       const reason = shouldReview(this.fresh, this.recent, Date.now() - this.lastSessionReviewAt, this.config.review);
       if (reason) void this.reviewSession(reason);
@@ -486,12 +531,34 @@ export class WatchController {
     this.set({ proposal: undefined });
     const cmd = buildSendCommand(this.args.target, text, process.env);
     if (!cmd) {
-      this.say("status", `copy to Claude: ${text}`);
+      // no terminal channel: Claude Code's hooks carry it, in any terminal, once they are installed
+      if (!hookLive(this.args.session)) {
+        this.say("status", `copy to Claude: ${text}`);
+        if (!this.hinted) this.say("answer", "This terminal has no way to hand a message to Claude, so copy the text above. To send from any terminal, run `tachi-agent watch --install-hooks` once and restart Claude Code.");
+        this.hinted = true;
+        return;
+      }
+      try {
+        const id = enqueue(this.args.session, cleanText(text));
+        this.say("answer", "→ queued for Claude — it reads it after its next tool call, when its turn ends, or with your next prompt", "sent", undefined, `/send ${text}`);
+        this.say("status", "→ queued for Claude — waiting for it to pick it up…");
+        this.awaitReceipt(text, async () => {
+          const r = readReceipt(this.args.session, id);
+          return r && (r.via === "expired" ? { state: "expired" } : { state: "delivered", via: `claude.${r.via}` });
+        }, 61 * 60_000);
+      } catch (err) {
+        this.say("answer", `✗ send failed: ${err instanceof Error ? err.message : String(err)}`, "error", undefined, `/send ${text}`);
+        this.set({ proposal: cleanProposal(text) });
+      }
       return;
     }
     // The outcome goes into the chat. "sent" is only queued: cmux hands it to Claude
     // at Claude's next hook, so the inbox is polled until it says delivered/read.
+    // herdr and hc hold the text until Claude's prompt is free (a draft of yours, a dialog): say so while it waits
+    this.say("status", "→ sending to Claude…");
+    const waiting = setTimeout(() => this.say("status", "→ still waiting — it is typed in once Claude's prompt is free"), 4000);
     execFile(cmd.cmd, cmd.args, (err, stdout) => {
+      clearTimeout(waiting);
       if (err) {
         // a failed send comes back as the proposal: ^S retries it, Esc drops it
         this.say("answer", `✗ send failed: ${err.message}`, "error", undefined, `/send ${text}`);
@@ -499,29 +566,40 @@ export class WatchController {
         this.set({ proposal: cleanProposal(text) });
         return;
       }
+      // herdr and hc type it into Claude's prompt and press Enter: delivered, nothing to wait for
+      if (!buildInboxCommand(this.args.target, process.env)) {
+        this.say("answer", "✓ Claude received it via prompt (typed in)", "received", undefined, `/send ${text}`);
+        this.say("status", "✓ Claude received it · typed into its prompt");
+        return;
+      }
       const id = /"id"\s*:\s*"([^"]+)"/.exec(stdout)?.[1];
       this.say("answer", `→ queued for Claude${id ? ` (${id.slice(0, 8)})` : ""} — waiting for Claude to receive it…`, "sent", undefined, `/send ${text}`);
       this.say("status", "→ sent to Claude — waiting for the receipt…");
-      if (id) this.awaitReceipt(id, text);
+      const inbox = buildInboxCommand(this.args.target, process.env);
+      if (id && inbox) {
+        this.awaitReceipt(text, () => new Promise((resolve) => {
+          execFile(inbox.cmd, inbox.args, { maxBuffer: 8 * 1024 * 1024 }, (e, out) => resolve(e ? undefined : parseInbox(out, id)));
+        }), 10 * 60_000);
+      }
     });
   }
 
-  /** Poll the target's cmux inbox until the message is delivered (or give up after 10 min). */
-  private awaitReceipt(id: string, text: string): void {
-    const inbox = buildInboxCommand(this.args.target, process.env);
-    if (!inbox) return;
-    const until = Date.now() + 10 * 60_000;
+  private hinted = false;
+
+  /** Poll `check` until the message is delivered (cmux's inbox, or the hook's receipts), or give up. */
+  private awaitReceipt(text: string, check: () => Promise<Receipt | undefined>, giveUpMs: number): void {
+    const until = Date.now() + giveUpMs;
     const short = text.length > 60 ? `${text.slice(0, 60)}…` : text;
     const tick = () => {
       if (this.controller.signal.aborted) return;
-      execFile(inbox.cmd, inbox.args, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-        const r = err ? undefined : parseInbox(stdout, id);
+      void check().catch(() => undefined).then((r) => {
+        if (r?.state === "expired") return this.say("answer", `✗ dropped — Claude took no step for an hour: ${short}`, "error");
         if (r && r.state !== "queued") {
           this.say("answer", `✓ Claude received it${r.via ? ` via ${r.via}` : ""} (${r.state}): ${short}`, "received");
           this.say("status", `✓ Claude received it${r.via ? ` · ${r.via.replace(/^claude\./, "")}` : ""}`);
           return;
         }
-        if (Date.now() > until) return this.say("answer", `✗ not received after 10 min (still ${r?.state ?? "unknown"}): ${short}`, "error");
+        if (Date.now() > until) return this.say("answer", `✗ not received after ${Math.round(giveUpMs / 60_000)} min (still ${r?.state ?? "unknown"}): ${short}`, "error");
         setTimeout(tick, 2000);
       });
     };
@@ -598,10 +676,12 @@ export async function runWatch(args: WatchArgs): Promise<void> {
   const cwd = args.cwd ?? process.cwd();
   // the pane's tab shows "tachi-watch", not the long launch command
   process.stdout.write(`\x1b]0;tachi-watch · ${args.session.slice(0, 8)}\x07`);
+  openInbox(); // lets the delivery hook, when installed, report in for this session
   const controller = new WatchController({ ...args, session: args.session, cwd }, loadWatchConfig(cwd));
   controller.start();
   const { renderWatchUi } = await import("./ui.js");
   await renderWatchUi(controller);
   await controller.stop();
+  clearQueue(args.session); // an undelivered message must not surface in a later turn with no pane to show it
   process.exit(0);
 }

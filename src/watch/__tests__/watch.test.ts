@@ -7,7 +7,7 @@ import {
   claudeProjectDir, claudeTranscriptPath, parseClaudeEntry, parseTraceEvent, tachibotTraceDir, toolLabel, type WatchEvent,
 } from "../events.js";
 import { buildReviewPrompt, parseReview, shouldReview, DEFAULT_POLICY } from "../policy.js";
-import { buildOpenCommand, buildSendCommand, defaultTarget, herdrPaneId, watchArgv } from "../terminal.js";
+import { buildOpenCommand, buildSendCommand, defaultTarget, herdrAppPane, herdrPaneId, supportsTruecolor, to256, watchArgv } from "../terminal.js";
 import { findTachibot } from "../sources.js";
 import { parseWatchArgs } from "../watch.js";
 import { loadWatchConfig, mergeConfig, DEFAULT_CONFIG } from "../config.js";
@@ -276,6 +276,59 @@ describe("terminal plumbing", () => {
     expect(buildSendCommand("herdr:w1:p2", "check it", {})).toEqual({ cmd: "herdr", args: ["agent", "prompt", "w1:p2", "[tachi-watch] check it"] });
   });
 
+  it("splits Claude's pane in the Herdr app and messages Claude via hc send", () => {
+    // the Herdr app embeds Ghostty: TERM_PROGRAM says ghostty, HC_* says whose terminal it is
+    const env = { HC_TERMINAL_ID: "t15", HC_TERMINAL_SOCKET: "/s.sock", TERM_PROGRAM: "ghostty" };
+    const plan = buildOpenCommand(argv, env, { platform: "darwin", tty: "/dev/ttys013" });
+    if (plan.kind !== "herdr-app") throw new Error(plan.kind);
+    expect(plan.list).toEqual({ cmd: "herdr-app", args: ["ls"] });
+    const ls = JSON.stringify({ spaces: [{ tabs: [{ terminals: [{ terminal: "t1", pane: "pA" }] }] }, { tabs: [{ terminals: [{ terminal: "t15", pane: "pB" }] }] }] });
+    expect(herdrAppPane(ls, plan.terminal)).toBe("pB");
+    expect(herdrAppPane(ls, "t99")).toBeUndefined();
+    expect(herdrAppPane("no window", "t15")).toBeUndefined();
+    const split = plan.split("pB");
+    expect(split.args.slice(0, 2)).toEqual(["do", "pane.split"]);
+    expect(JSON.parse(split.args[2])).toEqual({ direction: "right", pane: "pB", argv });
+    expect(defaultTarget(env)).toBe("hc:t15");
+    expect(buildSendCommand("hc:t15", "check it", {})).toEqual({ cmd: "hc", args: ["send", "t15", "[tachi-watch] check it"] });
+  });
+
+  it("opens a zellij pane and a kitty split, passing argv through unquoted", () => {
+    expect(buildOpenCommand(argv, { ZELLIJ: "0" })).toEqual({
+      kind: "zellij",
+      command: { cmd: "zellij", args: ["run", "--direction", "right", "--close-on-exit", "--name", "tachi-watch", "--cwd", "/my proj", "--", ...argv] },
+    });
+    const kitty = buildOpenCommand(argv, { KITTY_WINDOW_ID: "7", KITTY_LISTEN_ON: "unix:/tmp/kitty-1" });
+    if (kitty.kind !== "kitty") throw new Error(kitty.kind);
+    expect(kitty.command.args).toEqual(["@", "--to", "unix:/tmp/kitty-1", "launch", "--type=window", "--location=vsplit", "--next-to", "id:7", "--keep-focus", "--cwd", "/my proj", "--title", "tachi-watch", "--", ...argv]);
+    // no socket: Claude's shell has no tty for kitty to answer on, so say how to turn it on
+    const off = buildOpenCommand(argv, { KITTY_WINDOW_ID: "7" });
+    expect(off).toMatchObject({ kind: "manual", hint: expect.stringContaining("listen_on") });
+  });
+
+  it("splits Ghostty and iTerm2 by AppleScript only when Claude's own pane can be named", () => {
+    const ghostty = buildOpenCommand(argv, { TERM_PROGRAM: "ghostty" }, { platform: "darwin", tty: "/dev/ttys003" });
+    if (ghostty.kind !== "ghostty") throw new Error(ghostty.kind);
+    expect(ghostty.command.cmd).toBe("osascript");
+    // values ride as script arguments, never inside the script source
+    expect(ghostty.command.args.slice(-4)).toEqual(["--", "/dev/ttys003", "/node /cli.js watch --session s1 --cwd '/my proj' --target surface:5", "/my proj"]);
+    expect(ghostty.command.args.slice(0, -4).join(" ")).not.toContain("my proj");
+    expect(ghostty.command.args.join("\n")).toContain("first terminal whose tty is (item 1 of argv)");
+    // no tty to match, or not macOS: an app that merely embeds Ghostty must not be scripted
+    expect(buildOpenCommand(argv, { TERM_PROGRAM: "ghostty" }, { platform: "darwin" }).kind).toBe("manual");
+    expect(buildOpenCommand(argv, { TERM_PROGRAM: "ghostty" }, { platform: "linux", tty: "/dev/pts/3" }).kind).toBe("manual");
+
+    const iterm = buildOpenCommand(argv, { TERM_PROGRAM: "iTerm.app", ITERM_SESSION_ID: "w0t1p0:6E3B9C1A-0F2D-4B7A-9C11-AA22BB33CC44" }, { platform: "darwin" });
+    if (iterm.kind !== "iterm") throw new Error(iterm.kind);
+    expect(iterm.command.args.slice(-3)).toEqual(["--", "6E3B9C1A-0F2D-4B7A-9C11-AA22BB33CC44", "/node /cli.js watch --session s1 --cwd '/my proj' --target surface:5"]);
+    expect(buildOpenCommand(argv, { TERM_PROGRAM: "iTerm.app" }, { platform: "darwin" }).kind).toBe("manual");
+  });
+
+  it("a multiplexer inside a terminal app wins over the app", () => {
+    expect(buildOpenCommand(argv, { TMUX: "x", TERM_PROGRAM: "ghostty" }, { platform: "darwin", tty: "/dev/ttys003" }).kind).toBe("tmux");
+    expect(buildOpenCommand(argv, { ZELLIJ: "0", KITTY_WINDOW_ID: "7", KITTY_LISTEN_ON: "unix:/k" }).kind).toBe("zellij");
+  });
+
   it("sends through cmux agent message only with a target", () => {
     expect(buildSendCommand("surface:5", "check the 429", {})).toEqual({
       cmd: "cmux", args: ["agent", "message", "surface:5", "--from", "tachi-watch", "--json", "--", "check the 429"],
@@ -297,6 +350,7 @@ describe("cmux receipt", () => {
     expect(parseInbox(json, "m1")).toEqual({ state: "delivered", via: "claude.prompt-submit" });
     expect(parseInbox(json, "nope")).toBeUndefined();
     expect(buildInboxCommand("herdr:p1", {})).toBeUndefined();
+    expect(buildInboxCommand("hc:t15", {})).toBeUndefined();
     expect(buildInboxCommand("S1", {})?.args).toEqual(["agent", "inbox", "--surface", "S1", "--json"]);
   });
 });
@@ -373,5 +427,23 @@ describe("token usage", () => {
     const model = st.cards.find((c) => c.key === "tb:s2")!;
     expect(model.tokensIn).toBe(12400);
     expect(tokenTags({ call: st.cards[0], models: [model], notes: [] } as never)[0].label).toBe("in 12k · out 3.1k · think 800");
+  });
+});
+
+describe("colour depth", () => {
+  it("knows truecolor terminals from their env", () => {
+    expect(supportsTruecolor({ COLORTERM: "truecolor" })).toBe(true);
+    expect(supportsTruecolor({ TERM_PROGRAM: "iTerm.app" })).toBe(true);
+    expect(supportsTruecolor({ TERM: "xterm-kitty" })).toBe(true);
+    expect(supportsTruecolor({ TERM: "xterm-256color", TERM_PROGRAM: "Apple_Terminal" })).toBe(false);
+    expect(supportsTruecolor({})).toBe(false);
+  });
+
+  it("rewrites 24-bit colour as 256-colour and leaves every other style alone", () => {
+    expect(to256("\x1b[38;2;255;0;0mred\x1b[39m")).toBe("\x1b[38;5;196mred\x1b[39m");
+    expect(to256("\x1b[1;48;2;0;0;0;38;2;255;255;255mx\x1b[0m")).toBe("\x1b[1;48;5;16;38;5;231mx\x1b[0m");
+    expect(to256("\x1b[38;2;128;128;128mgrey")).toBe("\x1b[38;5;244mgrey");
+    const plain = "\x1b[1mbold\x1b[22m \x1b[38;5;45mkept\x1b[39m \x1b]8;;https://a.b/x;2;y\x07link\x1b]8;;\x07";
+    expect(to256(plain)).toBe(plain);
   });
 });
