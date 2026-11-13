@@ -333,6 +333,52 @@ tachi-agent runs log <run-id>          # inspect a run's durable event log
 
 `npm link` (or, once published, `npm i -g tachi-agent`) puts all eight binaries on your PATH: `tachi-agent`, `tachi-agent-daemon`, `tachi-agent-mcp`, `tachi-agent-gateway`, `tachi-agent-telegram`, `tachi-agent-slack`, `tachi-agent-repl`, `tachi-agent-swarm`.
 
+## tachi-watch — a second brain beside Claude Code
+
+A terminal pane that follows one Claude Code session: every tachibot call in full, a second
+model's notes on them checked against your project memory, a chat with that model, tachibot's
+prompt-technique catalog, and a one-key way to send Claude a message you approved.
+
+```bash
+# from inside Claude Code — opens the pane in a split beside it
+! tachi-agent watch --open
+
+# or in any pane you split yourself
+tachi-agent watch --session <claude session id> --cwd <project>
+```
+
+`--brain claude[:model] | codex | gemini | grok | driver[:name]` picks the second model.
+
+### Terminals
+
+Opening the split and sending a message to Claude are separate jobs. The split needs a
+terminal that can be scripted; sending does not, once the hook below is installed.
+
+| Terminal | `watch --open` splits it | Sends to Claude |
+|---|---|---|
+| cmux | yes | yes, with a delivery receipt |
+| Herdr (`herdr`), Herdr app (`hc`) | yes | yes — typed into Claude's prompt, held while a dialog is open |
+| tmux, zellij, WezTerm | yes | with the hook |
+| kitty | yes, with `allow_remote_control yes` and `listen_on unix:/tmp/kitty` in kitty.conf | with the hook |
+| Ghostty 1.3+, iTerm2 (macOS) | yes, by AppleScript | with the hook |
+| anything else | prints the command to run in a pane you split | with the hook |
+
+The pane draws in 24-bit colour where the terminal has it and in the 256-colour palette elsewhere.
+
+### Sending to Claude from any terminal
+
+```bash
+tachi-agent watch --install-hooks            # this project (.claude/settings.local.json)
+tachi-agent watch --install-hooks --global   # every project (~/.claude/settings.json)
+tachi-agent watch --uninstall-hooks
+```
+
+Restart Claude Code afterwards. The hook hands Claude what you sent from the pane at its next
+step: after a tool call, when it finishes a turn (it then carries on with your message), or
+with your next prompt. Nothing is typed into Claude's prompt, so a message can never answer
+one of its dialogs. A message that waits an hour is dropped, and the pane says so. Without
+the hook, and outside cmux and Herdr, the pane shows the text for you to copy.
+
 ## Interactive chat (v0.4.0)
 
 Bare `tachi-agent` (no arguments) opens an interactive REPL session. Pass `--driver <name>` or `--skill <name>` to start with a specific heart or skill bundle active.

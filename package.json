@@ -27,7 +27,7 @@
   "homepage": "https://bypawel.github.io/tachi-agent/",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "node scripts/sync-techniques.mjs --check && npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -43,10 +43,15 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
+    "ink": "^6.8.0",
+    "react": "^19.3.1",
+    "string-width": "^7.2.0",
+    "wrap-ansi": "^9.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/react": "^19.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
