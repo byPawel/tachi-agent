@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>tachi-watch — tachi-agent</title>
+  <meta name="description" content="tachi-watch: a terminal pane beside Claude Code that shows every tachibot call in full, checks it against your project memory with a second model, and sends Claude the messages you approve — in any terminal." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="wordmark" href="index.html"><span class="kanji">太刀</span> tachi-agent</a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="swarm.html">Swarm</a></li>
+        <li><a href="standalone.html">Standalone</a></li>
+        <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="watch.html">Watch</a></li>
+        <li><a href="get-started.html">Get started</a></li>
+        <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow hero-anim d1">// a second brain beside Claude Code</p>
+      <h1 class="hero-anim d2">tachi-watch</h1>
+      <p class="hero-sub hero-anim d3">
+        A terminal pane that follows <strong>one Claude Code session</strong>: every tachibot call
+        in full, a second model's notes on it <em>checked against your project memory</em>, a chat
+        with that model, and a way to send Claude the message you approved.
+      </p>
+      <p class="hero-anim d3" style="margin-top:2rem">
+        <img src="assets/tachi-watch.png" alt="The tachi-watch pane: a list of tachibot calls, a jury verdict with the second brain's notes citing CLAUDE.md, and a chat column with follow-up questions" style="width:100%;height:auto;display:block" />
+      </p>
+      <p style="color:var(--muted);font-size:.85em;margin-top:.5rem">The real pane, showing a staged session: <code>node scripts/watch-demo.mjs</code> writes it.</p>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===================== OPEN ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">01</span>
+          <span class="sec-kicker"><span class="box">┌─</span> open it</span>
+          <h2 class="sec-title">One command, from inside Claude Code.</h2>
+          <p class="sec-lead">The pane opens in a split beside Claude and follows that session. It reads Claude Code's transcript and tachibot's trace; it never writes to either.</p>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — open the pane</span>
+            <button class="copy-btn" aria-label="Copy command to clipboard">copy</button>
+          </div>
+<pre><span class="c"># from inside Claude Code: opens a split beside it</span>
+! tachi-agent watch --open
+
+<span class="c"># pick the second model</span>
+! tachi-agent watch --open --brain claude   <span class="c"># claude[:model] | codex | gemini | grok | driver[:name]</span></pre>
+        </div>
+
+        <div class="grid-2">
+          <article class="card" data-num="01">
+            <span class="card-tag">calls</span>
+            <h3>Every tachibot call, in full</h3>
+            <p>
+              Grouped under the question you asked. Jury panels, diff reviews, triage rankings
+              and planner checklists each get their own view; anything else shows as the tool
+              rendered it. <code>^F</code> searches every call's output, <code>^O</code> compares two.
+            </p>
+          </article>
+          <article class="card" data-num="02">
+            <span class="card-tag">second brain</span>
+            <h3>Checked against your memory</h3>
+            <p>
+              A second model reads each finished call next to <code>CLAUDE.md</code>,
+              <code>AGENTS.md</code>, Claude Code's auto-memory and <code>.remember/</code>, and
+              optionally dokoro recall. Its notes cite the file and line they rest on.
+            </p>
+          </article>
+          <article class="card" data-num="03">
+            <span class="card-tag">chat</span>
+            <h3>Ask about what you are looking at</h3>
+            <p>
+              Type a question; the selected call rides along as context. Answers come with
+              follow-ups on keys <code>1</code>–<code>3</code>.
+            </p>
+          </article>
+          <article class="card" data-num="04">
+            <span class="card-tag">prompts</span>
+            <h3>tachibot's technique catalog</h3>
+            <p>
+              The 88 prompt techniques ship with the pane. Search them, let the second model
+              pick three for your task, and apply one to Claude with <code>Enter</code>.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SEND ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">02</span>
+          <span class="sec-kicker"><span class="box">//</span> send to Claude</span>
+          <h2 class="sec-title">Nothing reaches Claude until you approve it.</h2>
+          <p class="sec-lead">The second brain may propose a message; <code>^S</code> sends it, <code>^E</code> edits it, <code>Esc</code> drops it. <code>@claude &lt;text&gt;</code> sends your own words.</p>
+        </div>
+
+        <div class="code" data-lang="bash">
+          <div class="code-head">
+            <span class="code-label">bash — sending from any terminal</span>
+            <button class="copy-btn" aria-label="Copy command to clipboard">copy</button>
+          </div>
+<pre>tachi-agent watch --install-hooks            <span class="c"># this project (.claude/settings.local.json)</span>
+tachi-agent watch --install-hooks --global   <span class="c"># every project (~/.claude/settings.json)</span>
+tachi-agent watch --uninstall-hooks</pre>
+        </div>
+
+        <div class="prose">
+          <p class="lede">A Claude Code hook carries the message, so the terminal does not matter.</p>
+          <p>
+            Restart Claude Code after installing. The hook hands Claude what you sent at its next
+            step: after a tool call, when it finishes a turn (it then carries on with your
+            message), or with your next prompt. Nothing is typed into Claude's prompt, so a
+            message can never answer one of its dialogs. The pane shows a receipt when Claude has it.
+          </p>
+          <p>
+            A message that waits an hour is dropped, and the pane says so. If a hook is killed
+            between printing a message and recording it, a later hook delivers it again:
+            Claude may see a message twice in that case, but never misses one. Without the hook,
+            and outside cmux and Herdr, the pane shows the text for you to copy.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== TERMINALS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">03</span>
+          <span class="sec-kicker"><span class="box">┌─</span> terminals</span>
+          <h2 class="sec-title">Opening the split and sending are separate jobs.</h2>
+          <p class="sec-lead">The split needs a terminal that can be scripted. Sending does not, once the hook is installed.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Terminal</th><th><code>watch --open</code> splits it</th><th>Sends to Claude</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>cmux</td><td>yes</td><td>yes, with a delivery receipt</td></tr>
+              <tr><td>Herdr (<code>herdr</code>), Herdr app (<code>hc</code>)</td><td>yes</td><td>yes — typed into Claude's prompt, held while a dialog is open</td></tr>
+              <tr><td>tmux, zellij, WezTerm</td><td>yes</td><td>with the hook</td></tr>
+              <tr><td>kitty</td><td>yes, with <code>allow_remote_control yes</code> and <code>listen_on unix:/tmp/kitty</code> in kitty.conf</td><td>with the hook</td></tr>
+              <tr><td>Ghostty 1.3+, iTerm2 (macOS)</td><td>yes, by AppleScript</td><td>with the hook</td></tr>
+              <tr><td>anything else</td><td>prints the command to run in a pane you split</td><td>with the hook</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="prose">
+          <p>
+            The pane draws in 24-bit colour where the terminal has it and in the 256-colour
+            palette elsewhere, and shows fewer sections on a short pane instead of squeezing them.
+          </p>
+          <p>
+            <strong>Model trace.</strong> The model calls nested under each tachibot call come
+            from tachibot's trace (<code>TACHIBOT_TRACE_UI=1</code>). The pane follows only the
+            tachibot that its own Claude session started, so it needs Claude's pid:
+            <code>watch --open</code> passes it, and so does the command it prints. A pane
+            started without it still lists every call from the transcript, without the nested
+            model calls.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== KEYS ===================== -->
+    <section class="section reveal">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="numeral" aria-hidden="true">04</span>
+          <span class="sec-kicker"><span class="box">//</span> keys</span>
+          <h2 class="sec-title">Keyboard first; the mouse works too.</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Key</th><th>Does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>Tab</code> / <code>Shift+Tab</code></td><td>Next / previous view: HOME, CALLS, CHAT, PROMPTS, MEMORY</td></tr>
+              <tr><td><code>↑</code> <code>↓</code>, <code>←</code> <code>→</code></td><td>Move in the list; switch focus between list and card</td></tr>
+              <tr><td><code>^F</code></td><td>Search every call's output</td></tr>
+              <tr><td><code>^B</code></td><td>Behind the scenes: the model calls of the selected call</td></tr>
+              <tr><td><code>^S</code> / <code>^E</code> / <code>Esc</code></td><td>Send / edit / drop the proposed message</td></tr>
+              <tr><td><code>^Y</code>, <code>^K</code>, <code>^P</code>, <code>^O</code></td><td>Copy, export, pin, compare the selected call</td></tr>
+              <tr><td><code>^G</code>, <code>?</code>, <code>^C</code></td><td>Home, all keys, quit</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="prose">
+          <p>Commands in the input line: <code>/review</code>, <code>/send &lt;text&gt;</code>, <code>/brain &lt;spec&gt;</code>, <code>/label &lt;name&gt;</code>, <code>/layout auto|split|stack</code>, <code>/mouse on|off</code>, <code>/help</code>.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-meta"><span>MIT</span> · local-first · built on MCP · <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a> · <a href="https://tachibot.com" target="_blank" rel="noopener">tachibot</a></div>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="swarm.html">Swarm</a>
+        <a href="standalone.html">Standalone</a>
+        <a href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+      <div class="footer-mark" aria-hidden="true">太刀</div>
+    </div>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

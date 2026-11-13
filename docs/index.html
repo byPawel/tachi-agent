@@ -22,6 +22,7 @@
         <li><a href="swarm.html">Swarm</a></li>
         <li><a href="standalone.html">Standalone</a></li>
         <li><a href="deploy.html">Deploy</a></li>
+        <li><a href="watch.html">Watch</a></li>
         <li><a href="get-started.html">Get started</a></li>
         <li><a class="nav-cta" href="https://github.com/byPawel/tachi-agent" target="_blank" rel="noopener">GitHub ↗</a></li>
       </ul>
@@ -256,6 +257,12 @@ tachi-agent --skill researcher <span class="s">"explain the CAP theorem trade-of
             <span class="tl-tag">L7 — conversation memory</span><span class="tl-state">✅ new in v0.6.0</span>
             <h4>A real multi-turn agent</h4>
             <p>Chat sessions now <strong>remember</strong>: the REPL and each Telegram chat carry prior user/assistant turns into every run — locally <em>and</em> through the daemon (<code>POST /runs</code> accepts <code>history</code>) — so follow-up questions keep their referent. Windows are capped and marked as data, never instructions; <code>/reset</code> clears them. <a href="https://github.com/byPawel/dokoro" target="_blank" rel="noopener">dokoro</a> remains the long-term memory across sessions. The <code>run_agent</code> MCP tool grows up too: <code>driver</code>, <code>skill</code>, and <code>systemPrompt</code> parameters let Claude Code drive tachi-agent as a fully configurable sub-agent.</p>
+          </li>
+          <li class="new">
+            <span class="tl-tag">L8 — tachi-watch</span><span class="tl-state">✅ new in v0.6.0</span>
+            <h4>A second brain beside Claude Code</h4>
+            <p>A terminal pane that follows one Claude Code session: every tachibot call in full, a second model's notes <strong>checked against your project memory</strong>, a chat, the prompt-technique catalog, and messages to Claude that you approve — delivered through a Claude Code hook, so it works in any terminal.</p>
+            <p><a href="watch.html">Read the Watch page →</a></p>
           </li>
         </ol>
       </div>
