@@ -12,7 +12,7 @@ import fs from "node:fs";
  */
 import { execFile } from "node:child_process";
 import { claudeTranscriptPath, type WatchEvent } from "./events.js";
-import { tailClaudeTranscript, followTachibot, findTachibot } from "./sources.js";
+import { tailClaudeTranscript, followTachibot } from "./sources.js";
 import { CALL_REVIEW_SYSTEM_PROMPT, WATCHER_SYSTEM_PROMPT, buildCallReviewPrompt, buildReviewPrompt, formatLog, parseReview, shouldReview, type ReviewReason } from "./policy.js";
 import { loadSaved, saveCards, loadLabels, saveLabels } from "./persist.js";
 import { splitFollowUps } from "./components.js";
@@ -439,21 +439,11 @@ export class WatchController {
   }
 
   // --- prompts tab -------------------------------------------------------------
-  private loadingTechniques = false;
-  /** Load the technique catalog once (the PROMPTS tab calls this when opened). */
-  async loadTechniques(): Promise<void> {
-    if (this.state.techniques || this.loadingTechniques) return;
-    this.loadingTechniques = true;
-    try {
-      const entry = findTachibot(this.args.cwd, undefined, this.args.claudePid);
-      const { list, from } = await loadTechniques(this.args.cwd, entry ? { port: entry.port, token: entry.token } : undefined);
-      this.set({ techniques: list, techniquesFrom: from });
-    } catch (err) {
-      this.say("status", err instanceof Error ? err.message : String(err));
-      this.set({ techniques: [] });
-    } finally {
-      this.loadingTechniques = false;
-    }
+  /** Load the bundled technique catalog once. */
+  loadTechniques(): void {
+    if (this.state.techniques) return;
+    const { list, from } = loadTechniques();
+    this.set({ techniques: list, techniquesFrom: from });
   }
 
   /** Ask the brain which 3 techniques fit a task, from tachibot's catalog. */

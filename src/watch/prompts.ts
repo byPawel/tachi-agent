@@ -1,13 +1,11 @@
 /**
  * tachi-watch — the PROMPTS tab: tachibot's prompt-technique catalog (88 research-backed
  * techniques), searchable, with a one-key way to ask Claude to apply one. The catalog
- * comes from the running tachibot's trace server (/techniques, token-protected), else
- * from tachibot's build in the project (`dist/src/tools/prompt-technique-tools.js`).
+ * ships with the panel as a snapshot, so the tab works in any project whether or not
+ * tachibot is running. It changes only on tachibot releases:
+ * `node scripts/sync-techniques.mjs` refreshes it, and publishing fails if it has drifted.
  */
-import fs from "node:fs";
-import http from "node:http";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import snapshot from "./techniques.snapshot.json" with { type: "json" };
 
 export interface Technique {
   name: string;
@@ -20,44 +18,9 @@ export interface Technique {
   kind?: "contract" | "scaffold" | "lens";
 }
 
-function getJson(url: string, timeoutMs = 4000): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const req = http.get(url, (res) => {
-      let body = "";
-      res.on("data", (d) => (body += d));
-      res.on("end", () => {
-        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
-        try {
-          resolve(JSON.parse(body));
-        } catch (err) {
-          reject(err);
-        }
-      });
-    });
-    req.setTimeout(timeoutMs, () => req.destroy(new Error("timeout")));
-    req.on("error", reject);
-  });
-}
-
-const isList = (v: unknown): v is Technique[] => Array.isArray(v) && v.every((t) => t && typeof t.name === "string" && typeof t.category === "string");
-
-/** The catalog: from the trace server when tachibot runs traced, else from tachibot's build in `cwd`. */
-export async function loadTechniques(cwd: string, trace?: { port: number; token: string }): Promise<{ list: Technique[]; from: string }> {
-  if (trace) {
-    try {
-      const v = await getJson(`http://127.0.0.1:${trace.port}/techniques?t=${encodeURIComponent(trace.token)}`);
-      if (isList(v)) return { list: v, from: "tachibot (live)" };
-    } catch {
-      // older tachibot without /techniques, or not reachable — try the build
-    }
-  }
-  // importing the project's build runs code from the repo — only when the user opts in
-  const mod = path.join(cwd, "dist", "src", "tools", "prompt-technique-tools.js");
-  if (process.env.TACHI_WATCH_LOCAL_TECHNIQUES === "1" && fs.existsSync(mod)) {
-    const m = (await import(pathToFileURL(mod).href)) as { FLAT_TECHNIQUES?: unknown };
-    if (isList(m.FLAT_TECHNIQUES)) return { list: m.FLAT_TECHNIQUES, from: "tachibot build" };
-  }
-  throw new Error("no technique catalog — run tachibot with TACHIBOT_TRACE_UI=1 (or set TACHI_WATCH_LOCAL_TECHNIQUES=1 in the tachibot-mcp project)");
+/** The bundled catalog; `from` names the tachibot version it came from, shown in the tab's header. */
+export function loadTechniques(): { list: Technique[]; from: string } {
+  return { list: snapshot.techniques as Technique[], from: `tachibot ${snapshot.catalogVersion} catalog` };
 }
 
 /** Rank for a free-text task: name/alias hits weigh most, then "use when", then the description; core first on ties. */

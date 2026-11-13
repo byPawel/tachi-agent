@@ -1114,7 +1114,7 @@ function PromptsView({ list, total, from, sel, query, width, rows, categories, c
   categories: string[]; catIdx: number; coreOnly: boolean; recommended?: WatchState["recommended"]; frame: number;
 }) {
   if (total === undefined) return <Box paddingTop={1}><Text color={THEME.muted}>loading tachibot's prompt techniques…</Text></Box>;
-  if (!total) return <Box paddingTop={1}><Text color={THEME.muted}>no technique catalog — see the status line</Text></Box>;
+  if (!total) return <Box paddingTop={1}><Text color={THEME.muted}>this build has no technique catalog</Text></Box>;
   const side = width >= 90;
   const listW = side ? Math.max(30, Math.floor(width * 0.4)) : width;
   const picksRow = recommended ? 1 + (recommended.picks.length ? 1 : 0) : 0;

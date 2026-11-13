@@ -247,10 +247,15 @@ describe("prompts", () => {
     expect(rankTechniques(list, "")).toHaveLength(3);
     expect(techniqueMessage(list[1], "ship the watcher")).toMatch(/"pre_mortem".*ship the watcher.*preview_prompt_technique/);
   });
-  it("loads the catalog from tachibot's build in the project", async () => {
+  it("loads the bundled catalog with no tachibot running, and names its version", async () => {
     const { loadTechniques } = await import("../prompts.js");
-    const { list, from } = await loadTechniques("/Users/gravity/Documents/WORK/TACHIBOT_ALL/tachibot-mcp").catch(() => ({ list: [], from: "missing" }));
-    if (from !== "missing") expect(list.length).toBeGreaterThan(20);
+    const { list, from } = loadTechniques();
+    expect(list.length).toBeGreaterThan(20);
+    for (const t of list) {
+      expect(t.name).toEqual(expect.any(String));
+      expect(t.category).toEqual(expect.any(String));
+    }
+    expect(from).toMatch(/^tachibot \d+\.\d+\.\d+ catalog$/);
   });
 });
 
