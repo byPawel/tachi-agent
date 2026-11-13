@@ -796,7 +796,7 @@ function Header({ s, calls, width, status, view, chatCount, frame }: { s: WatchS
         [fallbacks ? String(fallbacks).length + 10 : 0, fallbacks ? <Text key="f" color="#e3b341">{fallbacks} fallbacks</Text> : null],
         [String(notes).length + 6, <Text key="n"><Text color={notes ? "#e3b341" : "#8b949e"}>{notes}</Text><Text dimColor> notes</Text></Text>],
         [spark.length + 10, spark ? <Text key="s"><Text color={THEME.muted}>call time </Text><Text color="#56d364">{spark}</Text></Text> : null],
-        [traced ? 13 : 35, <Text key="m"><Text color={traced ? "#7ee787" : "#8b949e"}>{traced ? "●" : "○"}</Text><Text dimColor>{traced ? " model trace" : " model trace off"}</Text>{traced ? null : <Text color={THEME.note}> · /mcp reconnect</Text>}</Text>],
+        [traced ? 13 : 17, <Text key="m"><Text color={traced ? "#7ee787" : "#8b949e"}>{traced ? "●" : "○"}</Text><Text dimColor>{traced ? " model trace" : " model trace off"}</Text></Text>],
         [s.memory.length + 2, <Text key="mem"><Text color="#7ee787">●</Text><Text dimColor> {s.memory}</Text></Text>],
       ])}</Box>
       {status ? <Text dimColor wrap="truncate-end">{status.output}</Text> : null}
